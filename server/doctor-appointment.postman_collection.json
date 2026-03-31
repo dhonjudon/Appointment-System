@@ -1,0 +1,286 @@
+{
+  "info": {
+    "name": "Doctor Appointment System API",
+    "_postman_id": "b4a8074d-7c0c-4f65-bd8f-3c9fd9f6a001",
+    "description": "Postman collection for all endpoints defined in server/db.js",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api"
+    },
+    {
+      "key": "userId",
+      "value": "1"
+    },
+    {
+      "key": "doctorId",
+      "value": "1"
+    },
+    {
+      "key": "appointmentId",
+      "value": "1"
+    },
+    {
+      "key": "paymentId",
+      "value": "1"
+    },
+    {
+      "key": "notificationId",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient1@example.com\",\n  \"password\": \"StrongPass123!\",\n  \"role\": \"user\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Login User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient1@example.com\",\n  \"password\": \"StrongPass123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "Create Profile",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}},\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"phone\": \"+1234567890\",\n  \"city\": \"Colombo\",\n  \"country\": \"Sri Lanka\"\n}"
+            },
+            "url": "{{baseUrl}}/profile"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+94770000000\",\n  \"address_line1\": \"No 10, Main Street\"\n}"
+            },
+            "url": "{{baseUrl}}/profile/{{userId}}"
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/profile/{{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Doctors",
+      "item": [
+        {
+          "name": "Get All Doctors",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/doctors?page=1&limit=10&specialization_id=1&min_rating=4"
+          }
+        },
+        {
+          "name": "Get Doctor Details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/doctors/{{doctorId}}"
+          }
+        },
+        {
+          "name": "Get Available Schedules",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/doctors/{{doctorId}}/schedules?date=2026-04-05"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Appointments",
+      "item": [
+        {
+          "name": "Book Appointment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}},\n  \"doctor_id\": {{doctorId}},\n  \"hospital_id\": 1,\n  \"schedule_id\": 1,\n  \"appointment_date\": \"2026-04-05\",\n  \"start_time\": \"10:00:00\",\n  \"end_time\": \"10:30:00\",\n  \"reason\": \"General checkup\"\n}"
+            },
+            "url": "{{baseUrl}}/appointments"
+          }
+        },
+        {
+          "name": "Cancel Appointment",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}}\n}"
+            },
+            "url": "{{baseUrl}}/appointments/{{appointmentId}}/cancel"
+          }
+        },
+        {
+          "name": "Reschedule Appointment",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}},\n  \"new_appointment_date\": \"2026-04-06\",\n  \"new_start_time\": \"11:00:00\",\n  \"new_end_time\": \"11:30:00\",\n  \"reason\": \"Schedule conflict\"\n}"
+            },
+            "url": "{{baseUrl}}/appointments/{{appointmentId}}/reschedule"
+          }
+        },
+        {
+          "name": "Get User Appointments",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users/{{userId}}/appointments?page=1&limit=10&status=confirmed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Medical History",
+      "item": [
+        {
+          "name": "Add Medical History",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}},\n  \"allergies\": \"Peanuts\",\n  \"chronic_conditions\": \"Asthma\",\n  \"notes\": \"Carries inhaler\",\n  \"is_visible_to_doctors\": true\n}"
+            },
+            "url": "{{baseUrl}}/medical-history"
+          }
+        },
+        {
+          "name": "Update Medical History",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_medications\": \"Salbutamol\",\n  \"notes\": \"Updated notes\"\n}"
+            },
+            "url": "{{baseUrl}}/medical-history/{{userId}}"
+          }
+        },
+        {
+          "name": "Toggle Medical Visibility",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_visible_to_doctors\": false\n}"
+            },
+            "url": "{{baseUrl}}/medical-history/{{userId}}/visibility"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Create Payment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_id\": {{appointmentId}},\n  \"user_id\": {{userId}},\n  \"amount\": 1500,\n  \"currency\": \"USD\",\n  \"provider\": \"stripe\",\n  \"provider_payment_id\": \"pi_123456\"\n}"
+            },
+            "url": "{{baseUrl}}/payments"
+          }
+        },
+        {
+          "name": "Verify Payment",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"paid\"\n}"
+            },
+            "url": "{{baseUrl}}/payments/{{paymentId}}/verify"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "Get User Notifications",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users/{{userId}}/notifications?page=1&limit=10"
+          }
+        },
+        {
+          "name": "Mark Notification As Read",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}}\n}"
+            },
+            "url": "{{baseUrl}}/notifications/{{notificationId}}/read"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reviews",
+      "item": [
+        {
+          "name": "Add Doctor Review",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doctor_id\": {{doctorId}},\n  \"user_id\": {{userId}},\n  \"appointment_id\": {{appointmentId}},\n  \"rating\": 5,\n  \"review_text\": \"Very professional and helpful.\"\n}"
+            },
+            "url": "{{baseUrl}}/reviews"
+          }
+        }
+      ]
+    }
+  ]
+}
