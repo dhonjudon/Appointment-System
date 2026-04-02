@@ -1218,6 +1218,24 @@ const appointmentController = {
 
     sendSuccess(res, 200, "Appointments fetched successfully", data);
   }),
+
+  getCompletedAppointments: asyncHandler(async (req, res) => {
+    const userId = normalizeNumericId(req.params.userId);
+    if (!userId) {
+      return sendError(res, 400, "Valid userId is required");
+    }
+
+    const { page, limit, offset } = parsePagination(req.query);
+    const data = await appointmentService.getUserAppointments({
+      userId,
+      status: "completed",
+      page,
+      limit,
+      offset,
+    });
+
+    sendSuccess(res, 200, "Completed appointments fetched successfully", data);
+  }),
 };
 
 const medicalController = {
@@ -1432,6 +1450,10 @@ router.patch(
 router.get(
   "/users/:userId/appointments",
   appointmentController.getUserAppointments,
+);
+router.get(
+  "/users/:userId/appointments/completed",
+  appointmentController.getCompletedAppointments,
 );
 
 router.post("/medical-history", medicalController.addMedicalHistory);

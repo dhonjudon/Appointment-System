@@ -168,6 +168,13 @@
             "method": "GET",
             "url": "{{baseUrl}}/users/{{userId}}/appointments?page=1&limit=10&status=confirmed"
           }
+        },
+        {
+          "name": "Get Completed Appointments",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users/{{userId}}/appointments/completed?page=1&limit=10"
+          }
         }
       ]
     },
