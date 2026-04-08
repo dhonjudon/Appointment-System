@@ -128,19 +128,27 @@ function Register() {
           </form>
         </div>
       </div>
-
+       <div className="w-full md:w-[55%] lg:w-1/2 relative hidden md:block overflow-hidden">
       {/* RIGHT SIDE - Image and Overlay Text */}
-      <div className="w-full md:w-[55%] lg:w-1/2 relative hidden md:block">
-         <img src={doctorImg} alt="Doctor" className="w-full h-full object-cover object-center" />
-         
-         <div className="absolute top-[22%] -left-4 md:-left-10 lg:-left-16 xl:-left-24 z-20">
-           <h2 className="text-[2rem] lg:text-[2.2rem] font-serif font-extrabold text-[#0f5c51] mb-2 leading-[1.2] tracking-wide" style={{ textShadow: '1px 1px 12px rgba(255,255,255,0.7)' }}>
-             A Healthier You is Just<br/>an Appointment Away
-           </h2>
-           <p className="text-gray-900 text-base font-bold ml-1" style={{ textShadow: '1px 1px 8px rgba(255,255,255,0.8)' }}>
-             Access expert care ,effortlessly
-           </p>
-         </div>
+      <img 
+          src={doctorImg} 
+          alt="Doctor" 
+          className="w-full h-full object-cover object-center"
+        />
+      
+        {/* Gradient overlay (KEY FIX) */}
+        <div className="absolute inset-0 bg-gradient-to-l from-transparent via-[#eef2f5]/40 to-[#eef2f5]"></div>
+      
+        {/* Text */}
+        <div className="absolute top-[25%] left-[8%] md:left-[12%] lg:left-[20%] xl:left-[-0%] -top-4 z-20">
+          <h2 className="text-[1rem] lg:text-[1.7rem] font-serif font-extrabold text-[#0f5c51] mb-2 leading-[1.2] tracking-wide">
+            A Healthier You is Just<br/>an Appointment Away
+          </h2>
+          <p className="text-gray-900 text-base font-bold ml-1">
+            Access expert care, effortlessly
+          </p>
+        </div>
+      
       </div>
       
       {/* Footer Text */}

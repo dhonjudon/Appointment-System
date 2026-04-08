@@ -1,11 +1,12 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import doctorImg from "../assets/doctor.png";
 import logoImg from "../assets/logoimage.png";
 
 function Login() {
   const [showPassword, setShowPassword] = useState(false);
-
+  const navigate = useNavigate();
+  
   return (
     <div className="flex min-h-screen bg-[#eef2f5] font-sans overflow-hidden relative">
       
@@ -13,16 +14,19 @@ function Login() {
       <div className="w-full md:w-[45%] lg:w-1/2 flex flex-col justify-center items-center p-8 lg:p-16 z-10 relative">
         <div className="w-full max-w-sm xl:max-w-md px-4 bg-transparent">
           
-          {/* Logo */}
-          <div className="flex items-center justify-start mb-10">
-            <img src={logoImg} alt="logo" className="h-[4.5rem]" />
-          </div>
-
-          {/* Heading */}
-          <h2 className="text-xl font-bold text-gray-900 mb-8 ml-1">Log In</h2>
-
+          <div className="flex flex-col items-center justify-center mb-6">
+                      <img src={logoImg} alt="logo" className="h-[4.5rem] mb-3" />
+                      <h2 className="text-[1.35rem] font-extrabold text-gray-900 text-center tracking-tight">Log In Now</h2>
+                    </div>
+          
           {/* Form */}
-          <form className="w-full">
+          <form
+  className="w-full"
+  onSubmit={(e) => {
+    e.preventDefault();
+    navigate("/dashboard");
+  }}
+>
             
             {/* Email Field */}
             <div className="mb-6">
@@ -79,7 +83,9 @@ function Login() {
             </div>
 
             {/* Sign in button */}
-            <button className="w-full py-2.5 mb-12 border-2 border-[#0f5c51] text-[#0f5c51] font-bold rounded-full flex justify-center items-center hover:bg-[#0f5c51] hover:text-white transition-colors group">
+            <button
+            type="submit" 
+            className="w-full py-2.5 mb-12 border-2 border-[#0f5c51] text-[#0f5c51] font-bold rounded-full flex justify-center items-center hover:bg-[#0f5c51] hover:text-white transition-colors group">
               Sign in 
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2 mt-[1px] group-hover:text-white text-[#0f5c51]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
@@ -113,21 +119,29 @@ function Login() {
         </div>
       </div>
 
-      {/* RIGHT SIDE - Image and Overlay Text */}
-      <div className="w-full md:w-[55%] lg:w-1/2 relative hidden md:block">
-         {/* The image takes up the entire right column height */}
-         <img src={doctorImg} alt="Doctor" className="w-full h-full object-cover object-center" />
-         
-         {/* Floating text overlapping onto the right column space (or slightly left) */}
-         <div className="absolute top-[22%] -left-4 md:-left-20 lg:-left-32 xl:-left-[15rem] z-20">
-           <h2 className="text-[2rem] lg:text-[2.2rem] font-serif font-extrabold text-[#0f5c51] mb-2 leading-[1.2] tracking-wide" style={{ textShadow: '1px 1px 12px rgba(255,255,255,0.7)' }}>
-             A Healthier You is Just<br/>an Appointment Away
-           </h2>
-           <p className="text-gray-900 text-base font-bold ml-1" style={{ textShadow: '1px 1px 8px rgba(255,255,255,0.8)' }}>
-             Access expert care ,effortlessly
-           </p>
-         </div>
-      </div>
+      <div className="w-full md:w-[55%] lg:w-1/2 relative hidden md:block overflow-hidden">
+
+  {/* Image */}
+  <img 
+    src={doctorImg} 
+    alt="Doctor" 
+    className="w-full h-full object-cover object-center"
+  />
+
+  {/* Gradient overlay (KEY FIX) */}
+  <div className="absolute inset-0 bg-gradient-to-l from-transparent via-[#eef2f5]/40 to-[#eef2f5]"></div>
+
+  {/* Text */}
+  <div className="absolute top-[25%] left-[8%] md:left-[12%] lg:left-[20%] xl:left-[-0%] -top-4 z-20">
+    <h2 className="text-[1rem] lg:text-[1.7rem] font-serif font-extrabold text-[#0f5c51] mb-2 leading-[1.2] tracking-wide">
+      A Healthier You is Just<br/>an Appointment Away
+    </h2>
+    <p className="text-gray-900 text-base font-bold ml-1">
+      Access expert care, effortlessly
+    </p>
+  </div>
+
+</div>
       
       {/* Footer Text */}
       <div className="absolute bottom-6 left-0 right-0 text-center text-sm font-bold text-gray-900 z-30">
