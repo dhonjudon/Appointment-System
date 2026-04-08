@@ -383,7 +383,7 @@ const doctorService = {
 				FROM doctor_schedules
 				WHERE doctor_id = $1
 					AND is_active = TRUE
-					AND ($2::date IS NULL OR day_of_week = EXTRACT(DOW FROM $2::date)::smallint)
+          AND ($2::date IS NULL OR day_of_week::int = EXTRACT(DOW FROM $2::date)::int)
 				ORDER BY day_of_week, start_time
 			`,
       [doctorId, date || null],
@@ -417,6 +417,74 @@ const doctorService = {
   },
 };
 
+doctorService.addDoctor = async (payload) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const {
+      email,
+      password,
+      first_name,
+      last_name,
+      specialization_id,
+      license_number,
+      years_of_experience,
+      consultation_fee,
+      bio,
+    } = payload;
+
+    // 1. Create user
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const userResult = await client.query(
+      `INSERT INTO users (email, password_hash, role)
+       VALUES ($1, $2, 'doctor')
+       RETURNING id`,
+      [email, hashedPassword],
+    );
+
+    const userId = userResult.rows[0].id;
+
+    // 2. Create profile
+    await client.query(
+      `INSERT INTO user_profiles (user_id, first_name, last_name)
+       VALUES ($1, $2, $3)`,
+      [userId, first_name, last_name],
+    );
+
+    // 3. Create doctor
+    const doctorResult = await client.query(
+      `INSERT INTO doctors (
+        user_id,
+        specialization_id,
+        license_number,
+        years_of_experience,
+        consultation_fee,
+        bio
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *`,
+      [
+        userId,
+        specialization_id,
+        license_number,
+        years_of_experience || 0,
+        consultation_fee || 0,
+        bio || null,
+      ],
+    );
+
+    await client.query("COMMIT");
+    return doctorResult.rows[0];
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 const appointmentService = {
   bookAppointment: async ({
     user_id,
@@ -447,7 +515,7 @@ const appointmentService = {
 					WHERE id = $1
 						AND doctor_id = $2
 						AND is_active = TRUE
-						AND day_of_week = EXTRACT(DOW FROM $3::date)::smallint
+            AND day_of_week::int = EXTRACT(DOW FROM $3::date)::int
 						AND start_time <= $4::time
 						AND end_time >= $5::time
 				`,
@@ -1106,6 +1174,32 @@ const doctorController = {
   }),
 };
 
+doctorController.addDoctor = asyncHandler(async (req, res) => {
+  const {
+    email,
+    password,
+    first_name,
+    last_name,
+    specialization_id,
+    license_number,
+  } = req.body;
+
+  if (
+    !email ||
+    !password ||
+    !first_name ||
+    !last_name ||
+    !specialization_id ||
+    !license_number
+  ) {
+    return sendError(res, 400, "Missing required fields");
+  }
+
+  const doctor = await doctorService.addDoctor(req.body);
+
+  sendSuccess(res, 201, "Doctor created successfully", doctor);
+});
+
 const appointmentController = {
   bookAppointment: asyncHandler(async (req, res) => {
     const payload = {
@@ -1476,7 +1570,7 @@ router.patch(
 );
 
 router.post("/reviews", reviewController.addDoctorReview);
-
+router.post("/doctors", doctorController.addDoctor);
 module.exports = {
   pool,
   router,

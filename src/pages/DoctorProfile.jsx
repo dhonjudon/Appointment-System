@@ -1,106 +1,218 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import axios from "axios";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import MiniCalendar from "../components/MiniCalendar";
 
-const doctorsDatabase = {
-  1: {
-    id: 1,
-    name: "Dr. Anna Kowalski",
-    specialty: "ENT Specialist",
-    education: "Warsaw Medical Academy",
-    qualifications: ["MD (Otolaryngology)", "Fellowship in Pediatric ENT"],
-    hospital: "St. Mary Multispeciality Hospital",
-    location: "Downtown Medical District",
-    phone: "+48 22 100 2000",
-    email: "anna.kowalski@stmarycare.com",
-    consultationModes: ["In-person", "Video Consultation"],
-    rating: 4.87,
-    reviews: 124,
-    patientsTreated: 3200,
-    responseTime: "Replies in under 1 hour",
-    nextAvailable: "Today, 2:00 PM",
-    experience: "12 years",
-    languages: ["English", "Polish", "German"],
-    about:
-      "Dr. Anna Kowalski is a highly experienced ENT specialist with over 12 years of practice. She specializes in treating disorders of the ear, nose, and throat, with particular expertise in pediatric ENT conditions and minimally invasive sinus surgery.",
-    services: [
-      "Endoscopic sinus evaluation",
-      "Pediatric ear infection treatment",
-      "Sleep apnea screening",
-      "Hearing loss consultation",
-    ],
-    conditionsTreated: [
-      "Sinusitis",
-      "Tonsillitis",
-      "Vertigo",
-      "Nasal polyps",
-      "Allergic rhinitis",
-    ],
-    feeIncludes: [
-      "Doctor consultation",
-      "Digital prescription",
-      "7-day follow-up chat",
-    ],
-    consultationFee: 150,
-    availableDates: [2, 4, 7, 9, 11, 14, 16, 18, 21, 23, 25, 28, 30],
-    bookedDates: [3, 10, 17, 24],
-    timeSlotsMorning: ["9:00 AM", "10:00 AM", "11:30 AM"],
-    timeSlotsAfternoon: ["1:00 PM", "2:00 PM", "3:30 PM"],
-    timeSlotsEvening: ["5:00 PM", "6:30 PM"],
-  },
-  2: {
-    id: 2,
-    name: "Dr. Priya Sharma",
-    specialty: "Cardiologist",
-    education: "AIIMS Delhi",
-    qualifications: ["DM Cardiology", "Interventional Cardiology Fellowship"],
-    hospital: "Heartline Advanced Cardiac Centre",
-    location: "North Wing, City Health Campus",
-    phone: "+91 11 4400 9900",
-    email: "priya.sharma@heartlinecare.in",
-    consultationModes: ["In-person", "Video Consultation"],
-    rating: 4.92,
-    reviews: 256,
-    patientsTreated: 5100,
-    responseTime: "Replies in under 2 hours",
-    nextAvailable: "Tomorrow, 10:00 AM",
-    experience: "15 years",
-    languages: ["English", "Hindi", "Punjabi"],
-    about:
-      "Dr. Priya Sharma is a renowned cardiologist specializing in interventional cardiology and heart failure management. She has performed over 2000 successful cardiac procedures.",
-    services: [
-      "ECG and stress test review",
-      "Hypertension management",
-      "Chest pain evaluation",
-      "Post-stent follow-up",
-    ],
-    conditionsTreated: [
-      "Coronary artery disease",
-      "Heart failure",
-      "Hypertension",
-      "Arrhythmia",
-      "High cholesterol",
-    ],
-    feeIncludes: [
-      "Doctor consultation",
-      "Care plan summary",
-      "14-day follow-up support",
-    ],
-    consultationFee: 200,
-    availableDates: [1, 5, 8, 12, 15, 19, 22, 26, 29],
-    bookedDates: [6, 13, 20, 27],
-    timeSlotsMorning: ["10:00 AM", "11:00 AM"],
-    timeSlotsAfternoon: ["2:00 PM", "4:00 PM"],
-    timeSlotsEvening: ["6:00 PM"],
-  },
+const defaultDoctor = {
+  id: 1,
+  name: "Dr. Anna Kowalski",
+  specialty: "ENT Specialist",
+  education: "Warsaw Medical Academy",
+  qualifications: ["MD (Otolaryngology)", "Fellowship in Pediatric ENT"],
+  hospital: "St. Mary Multispeciality Hospital",
+  location: "Downtown Medical District",
+  phone: "+48 22 100 2000",
+  email: "anna.kowalski@stmarycare.com",
+  consultationModes: ["In-person", "Video Consultation"],
+  rating: 4.87,
+  reviews: 124,
+  patientsTreated: 3200,
+  responseTime: "Replies in under 1 hour",
+  nextAvailable: "Today, 2:00 PM",
+  experience: "12 years",
+  languages: ["English", "Polish", "German"],
+  about:
+    "Dr. Anna Kowalski is a highly experienced ENT specialist with over 12 years of practice. She specializes in treating disorders of the ear, nose, and throat, with particular expertise in pediatric ENT conditions and minimally invasive sinus surgery.",
+  services: [
+    "Endoscopic sinus evaluation",
+    "Pediatric ear infection treatment",
+    "Sleep apnea screening",
+    "Hearing loss consultation",
+  ],
+  conditionsTreated: [
+    "Sinusitis",
+    "Tonsillitis",
+    "Vertigo",
+    "Nasal polyps",
+    "Allergic rhinitis",
+  ],
+  feeIncludes: [
+    "Doctor consultation",
+    "Digital prescription",
+    "7-day follow-up chat",
+  ],
+  consultationFee: 150,
+  availableDates: [2, 4, 7, 9, 11, 14, 16, 18, 21, 23, 25, 28, 30],
+  bookedDates: [3, 10, 17, 24],
+  timeSlotsMorning: ["9:00 AM", "10:00 AM", "11:30 AM"],
+  timeSlotsAfternoon: ["1:00 PM", "2:00 PM", "3:30 PM"],
+  timeSlotsEvening: ["5:00 PM", "6:30 PM"],
 };
 
-const defaultDoctor = doctorsDatabase[1];
+const mapSchedulesToDates = (schedules = []) => {
+  if (!Array.isArray(schedules) || !schedules.length) {
+    return {
+      availableDates: defaultDoctor.availableDates,
+      bookedDates: defaultDoctor.bookedDates,
+    };
+  }
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const scheduleDays = new Set(
+    schedules
+      .map((slot) => Number(slot.day_of_week))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
+  );
+
+  const availableDates = [];
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(year, month, day);
+    if (scheduleDays.has(date.getDay())) {
+      availableDates.push(day);
+    }
+  }
+
+  return {
+    availableDates: availableDates.length
+      ? availableDates
+      : defaultDoctor.availableDates,
+    bookedDates: defaultDoctor.bookedDates,
+  };
+};
+
+const mapDoctorApiToViewModel = (doctorApi = {}, schedules = []) => {
+  const firstName = doctorApi.first_name || "";
+  const lastName = doctorApi.last_name || "";
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+  const displayName = fullName ? `Dr. ${fullName}` : defaultDoctor.name;
+
+  const primaryHospital = Array.isArray(doctorApi.hospitals)
+    ? doctorApi.hospitals.find((hospital) => hospital?.is_primary) ||
+      doctorApi.hospitals[0]
+    : null;
+
+  const location = [
+    primaryHospital?.address_line1,
+    primaryHospital?.city,
+    primaryHospital?.state,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  const yearsOfExperience = Number(doctorApi.years_of_experience);
+  const rating = Number(doctorApi.average_rating);
+  const reviewCount = Number(doctorApi.total_reviews);
+  const consultationFee = Number(doctorApi.consultation_fee);
+  const scheduleDates = mapSchedulesToDates(schedules);
+
+  return {
+    ...defaultDoctor,
+    id: doctorApi.id || defaultDoctor.id,
+    name: displayName,
+    specialty: doctorApi.specialization_name || defaultDoctor.specialty,
+    hospital: primaryHospital?.name || defaultDoctor.hospital,
+    location: location || defaultDoctor.location,
+    email: doctorApi.email || defaultDoctor.email,
+    rating:
+      Number.isFinite(rating) && rating > 0 ? rating : defaultDoctor.rating,
+    reviews:
+      Number.isFinite(reviewCount) && reviewCount >= 0
+        ? reviewCount
+        : defaultDoctor.reviews,
+    experience:
+      Number.isFinite(yearsOfExperience) && yearsOfExperience >= 0
+        ? `${yearsOfExperience} years`
+        : defaultDoctor.experience,
+    consultationFee:
+      Number.isFinite(consultationFee) && consultationFee > 0
+        ? consultationFee
+        : defaultDoctor.consultationFee,
+    about: doctorApi.bio || defaultDoctor.about,
+    qualifications: doctorApi.license_number
+      ? [
+          defaultDoctor.qualifications[0],
+          `License: ${doctorApi.license_number}`,
+        ]
+      : defaultDoctor.qualifications,
+    availableDates: scheduleDates.availableDates,
+    bookedDates: scheduleDates.bookedDates,
+  };
+};
 
 function DoctorProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const doctor = doctorsDatabase[id] || defaultDoctor;
+  const [doctor, setDoctor] = useState(defaultDoctor);
+  const [schedules, setSchedules] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const doctorId = Number(id);
+
+    if (!Number.isInteger(doctorId) || doctorId <= 0) {
+      setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchDoctorProfile = async () => {
+      try {
+        const [doctorResult, schedulesResult] = await Promise.allSettled([
+          axios.get(`http://localhost:3000/api/doctors/${doctorId}`),
+          axios.get(`http://localhost:3000/api/doctors/${doctorId}/schedules`),
+        ]);
+
+        if (doctorResult.status === "fulfilled") {
+          const doctorPayload = doctorResult.value?.data?.data || {};
+          const schedulePayload =
+            schedulesResult.status === "fulfilled"
+              ? schedulesResult.value?.data?.data?.schedules || []
+              : [];
+          const mappedDoctor = mapDoctorApiToViewModel(
+            doctorPayload,
+            schedulePayload,
+          );
+
+          if (isMounted) {
+            setDoctor(mappedDoctor);
+          }
+        } else {
+          console.error("Error fetching doctor profile:", doctorResult.reason);
+        }
+
+        if (schedulesResult.status === "fulfilled") {
+          const schedulePayload = schedulesResult.value?.data?.data?.schedules;
+          if (isMounted) {
+            setSchedules(Array.isArray(schedulePayload) ? schedulePayload : []);
+          }
+        } else {
+          console.error(
+            "Error fetching doctor schedules:",
+            schedulesResult.reason,
+          );
+          if (isMounted) {
+            setSchedules([]);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching doctor profile:", error);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchDoctorProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
 
   const initials = doctor.name
     .split(" ")
@@ -120,6 +232,18 @@ function DoctorProfile() {
   const availabilityScore = totalDates
     ? Math.round((doctor.availableDates.length / totalDates) * 100)
     : 0;
+  const scheduleDays = Array.from(
+    new Set(
+      schedules
+        .map((slot) => Number(slot.day_of_week))
+        .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
+    ),
+  );
+  const dynamicAvailabilityScore = scheduleDays.length
+    ? Math.round((scheduleDays.length / 7) * 100)
+    : availabilityScore;
+
+  if (loading) return <p className="p-6 text-gray-500">Loading profile...</p>;
 
   return (
     <div className="h-screen overflow-hidden bg-linear-to-b from-emerald-50 to-white flex">
@@ -166,7 +290,7 @@ function DoctorProfile() {
             </div>
             <div className="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
               <p className="font-bold text-emerald-600">
-                ${doctor.consultationFee}
+                RS{doctor.consultationFee}
               </p>
               <p className="text-xs text-gray-500">Per visit</p>
             </div>
@@ -457,7 +581,7 @@ function DoctorProfile() {
                       Availability Calendar
                     </h3>
                     <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                      {availabilityScore}% slots open
+                      {dynamicAvailabilityScore}% slots open
                     </span>
                   </div>
 
@@ -472,6 +596,7 @@ function DoctorProfile() {
                   </div>
 
                   <MiniCalendar
+                    scheduleDays={scheduleDays}
                     availableDates={doctor.availableDates}
                     bookedDates={doctor.bookedDates}
                     interactive={false}
@@ -500,7 +625,7 @@ function DoctorProfile() {
                     <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
                       <span className="text-gray-500">Consultation Fee</span>
                       <span className="text-lg font-bold text-emerald-600">
-                        ${doctor.consultationFee}
+                        Rs{doctor.consultationFee}
                       </span>
                     </div>
                   </div>

@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 const MiniCalendar = ({
+  scheduleDays = [],
   availableDates = [],
   bookedDates = [],
   selectedDate = null,
@@ -8,9 +9,24 @@ const MiniCalendar = ({
   compact = false,
   interactive = true,
 }) => {
-  const [currentMonth, setCurrentMonth] = useState(
-    new Date(2026, selectedDate ? selectedDate.getMonth() : 3, 1),
+  const normalizedScheduleDays = Array.from(
+    new Set(
+      scheduleDays
+        .map((day) => Number(day))
+        .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6),
+    ),
   );
+  const hasScheduleDays = normalizedScheduleDays.length > 0;
+
+  const [currentMonth, setCurrentMonth] = useState(
+    new Date(selectedDate || new Date()),
+  );
+
+  useEffect(() => {
+    if (selectedDate) {
+      setCurrentMonth(new Date(selectedDate));
+    }
+  }, [selectedDate]);
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -39,7 +55,11 @@ const MiniCalendar = ({
 
   const available =
     availableDates.length > 0 ? availableDates : defaultAvailable;
-  const booked = bookedDates.length > 0 ? bookedDates : defaultBooked;
+  const booked = hasScheduleDays
+    ? bookedDates
+    : bookedDates.length > 0
+      ? bookedDates
+      : defaultBooked;
 
   const prevMonth = () => {
     setCurrentMonth(new Date(year, month - 1, 1));
@@ -51,6 +71,10 @@ const MiniCalendar = ({
 
   const getDayStatus = (day) => {
     if (booked.includes(day)) return "booked";
+    if (hasScheduleDays) {
+      const weekday = new Date(year, month, day).getDay();
+      return normalizedScheduleDays.includes(weekday) ? "available" : "none";
+    }
     if (available.includes(day)) return "available";
     return "none";
   };
