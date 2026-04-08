@@ -555,8 +555,10 @@ function DoctorsList() {
     try {
       // Build query parameters
       const params = new URLSearchParams();
-      if (selectedSpecialty !== "All Specialties") params.append("specialization", selectedSpecialty);
-      if (selectedHospital !== "All Hospitals") params.append("hospital", selectedHospital);
+      if (selectedSpecialty !== "All Specialties")
+        params.append("specialization", selectedSpecialty);
+      if (selectedHospital !== "All Hospitals")
+        params.append("hospital", selectedHospital);
       if (showAvailableOnly) params.append("available", "true");
       if (searchQuery) params.append("search", searchQuery);
 
@@ -662,7 +664,9 @@ function DoctorsList() {
                   </div>
                   <span
                     className={`text-sm ${
-                      selectedSpecialty === spec ? "text-emerald-700 font-medium" : "text-gray-600"
+                      selectedSpecialty === spec
+                        ? "text-emerald-700 font-medium"
+                        : "text-gray-600"
                     }`}
                   >
                     {spec}
@@ -699,10 +703,12 @@ function DoctorsList() {
           <div className="relative px-6 lg:px-10 pt-10 pb-8">
             <div className="text-center max-w-3xl mx-auto">
               <h1 className="text-3xl md:text-4xl font-bold text-gray-800 mb-3">
-                Find Your <span className="text-emerald-600">Perfect Doctor</span>
+                Find Your{" "}
+                <span className="text-emerald-600">Perfect Doctor</span>
               </h1>
               <p className="text-gray-500 text-lg">
-                Connect with world-class healthcare professionals tailored to your needs
+                Connect with world-class healthcare professionals tailored to
+                your needs
               </p>
             </div>
 
@@ -716,7 +722,11 @@ function DoctorsList() {
                   stroke="currentColor"
                   strokeWidth={2}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
                 </svg>
                 <input
                   type="text"
@@ -734,13 +744,18 @@ function DoctorsList() {
         <div className="px-6 lg:px-10 py-8">
           <div className="flex items-center justify-between mb-6">
             <p className="text-gray-600">
-              <span className="text-emerald-600 font-semibold">{doctorsData.length}</span> doctors available
+              <span className="text-emerald-600 font-semibold">
+                {doctorsData.length}
+              </span>{" "}
+              doctors available
             </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
             {loading ? (
-              <p className="text-center col-span-full text-gray-500 py-10">Loading doctors...</p>
+              <p className="text-center col-span-full text-gray-500 py-10">
+                Loading doctors...
+              </p>
             ) : doctorsData.length > 0 ? (
               doctorsData.map((doctor) => (
                 <div
@@ -776,8 +791,12 @@ function DoctorsList() {
                     />
                   </svg>
                 </div>
-                <h3 className="text-xl font-semibold text-gray-800 mb-2">No doctors found</h3>
-                <p className="text-gray-500 mb-4">Try adjusting your filters to find more doctors</p>
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">
+                  No doctors found
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  Try adjusting your filters to find more doctors
+                </p>
                 <button
                   onClick={clearFilters}
                   className="px-6 py-2.5 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 transition-colors font-medium"
