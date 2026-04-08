@@ -3,9 +3,14 @@ import React, { useState } from "react";
 const MiniCalendar = ({
   availableDates = [],
   bookedDates = [],
+  selectedDate = null,
   onDateSelect,
+  compact = false,
+  interactive = true,
 }) => {
-  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 3, 1)); // April 2026
+  const [currentMonth, setCurrentMonth] = useState(
+    new Date(2026, selectedDate ? selectedDate.getMonth() : 3, 1),
+  );
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -15,21 +20,20 @@ const MiniCalendar = ({
   const startDay = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
 
   const monthNames = [
-    "January",
-    "February",
-    "March",
-    "April",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
     "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
 
-  // Sample availability data (green = available, red = booked/unavailable)
   const defaultAvailable = [2, 4, 7, 9, 11, 14, 16, 18, 21, 23, 25, 28, 30];
   const defaultBooked = [3, 10, 17, 24];
 
@@ -51,66 +55,71 @@ const MiniCalendar = ({
     return "none";
   };
 
+  const isSelectedDay = (day) => {
+    return (
+      selectedDate &&
+      selectedDate.getFullYear() === year &&
+      selectedDate.getMonth() === month &&
+      selectedDate.getDate() === day
+    );
+  };
+
   const handleDateClick = (day, status) => {
-    if (status === "available" && onDateSelect) {
+    if (interactive && status === "available" && onDateSelect) {
       onDateSelect(new Date(year, month, day));
     }
   };
 
-  const renderDays = () => {
-    const days = [];
+  const buildCalendarDays = () => {
+    const grid = [];
+    const prevMonthDays = new Date(year, month, 0).getDate();
 
-    // Empty cells before first day
-    for (let i = 0; i < startDay; i++) {
-      days.push(<div key={`empty-${i}`} className="w-7 h-7" />);
-    }
+    for (let i = 0; i < 42; i++) {
+      const dayNumber = i - startDay + 1;
 
-    // Days of month
-    for (let day = 1; day <= daysInMonth; day++) {
-      const status = getDayStatus(day);
-      let bgClass = "bg-white border border-gray-200";
-      let textClass = "text-gray-600";
-      let cursor = "cursor-default";
-
-      if (status === "available") {
-        bgClass = "bg-emerald-500 border border-emerald-600";
-        textClass = "text-white";
-        cursor = "cursor-pointer hover:bg-emerald-600";
-      } else if (status === "booked") {
-        bgClass = "bg-red-400 border border-red-500";
-        textClass = "text-white";
-        cursor = "cursor-not-allowed";
+      if (dayNumber < 1) {
+        grid.push({
+          key: `prev-${i}`,
+          day: prevMonthDays + dayNumber,
+          isCurrentMonth: false,
+          status: "none",
+        });
+      } else if (dayNumber > daysInMonth) {
+        grid.push({
+          key: `next-${i}`,
+          day: dayNumber - daysInMonth,
+          isCurrentMonth: false,
+          status: "none",
+        });
+      } else {
+        grid.push({
+          key: `current-${dayNumber}`,
+          day: dayNumber,
+          isCurrentMonth: true,
+          status: getDayStatus(dayNumber),
+        });
       }
-
-      days.push(
-        <div
-          key={day}
-          onClick={() => handleDateClick(day, status)}
-          className={`w-7 h-7 rounded-md flex items-center justify-center text-[11px] font-semibold transition-all ${bgClass} ${textClass} ${cursor}`}
-        >
-          {day}
-        </div>,
-      );
     }
 
-    return days;
+    return grid;
   };
 
+  const days = buildCalendarDays();
+
   return (
-    <div className="bg-[#f0fdfa] rounded-2xl p-4 border border-emerald-100 shadow-sm">
+    <div>
       {/* Header */}
-      <div className="flex justify-between items-center mb-3">
+      <div className="mb-3 flex items-center justify-between">
         <button
           onClick={prevMonth}
-          className="w-6 h-6 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition"
+          className="h-7 w-7 rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 hover:border-emerald-300 flex items-center justify-center"
         >
           <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-3 w-3"
+            className="h-3.5 w-3.5"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
-            strokeWidth={2.5}
+            strokeWidth={2}
           >
             <path
               strokeLinecap="round"
@@ -119,20 +128,19 @@ const MiniCalendar = ({
             />
           </svg>
         </button>
-        <h4 className="text-sm font-bold text-[#0f766e]">
+        <h4 className="text-sm font-semibold text-gray-800">
           {monthNames[month]} {year}
         </h4>
         <button
           onClick={nextMonth}
-          className="w-6 h-6 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition"
+          className="h-7 w-7 rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 hover:border-emerald-300 flex items-center justify-center"
         >
           <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-3 w-3"
+            className="h-3.5 w-3.5"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
-            strokeWidth={2.5}
+            strokeWidth={2}
           >
             <path
               strokeLinecap="round"
@@ -144,11 +152,11 @@ const MiniCalendar = ({
       </div>
 
       {/* Weekday headers */}
-      <div className="grid grid-cols-7 gap-1 mb-2">
+      <div className="mb-1.5 grid grid-cols-7 gap-0.5">
         {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
           <div
             key={i}
-            className="w-7 h-5 flex items-center justify-center text-[10px] font-bold text-gray-400"
+            className="h-6 flex items-center justify-center text-[10px] font-medium text-gray-400"
           >
             {d}
           </div>
@@ -156,25 +164,61 @@ const MiniCalendar = ({
       </div>
 
       {/* Days grid */}
-      <div className="grid grid-cols-7 gap-1">{renderDays()}</div>
+      <div className="grid grid-cols-7 gap-0.5">
+        {days.map((day) => {
+          const isSelected = day.isCurrentMonth && isSelectedDay(day.day);
+          const isAvailable = day.status === "available";
+          const isBooked = day.status === "booked";
+
+          let baseClass =
+            "h-8 w-8 rounded-lg text-xs font-medium transition-all flex items-center justify-center mx-auto";
+          let stateClass = "text-gray-300";
+          let cursorClass = "cursor-default";
+
+          if (day.isCurrentMonth) {
+            stateClass = "text-gray-600 hover:bg-gray-50";
+          }
+
+          if (isAvailable && interactive) {
+            stateClass = isSelected
+              ? "bg-emerald-500 text-white shadow-sm"
+              : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100";
+            cursorClass = "cursor-pointer";
+          } else if (isAvailable && !interactive) {
+            stateClass = "bg-emerald-50 text-emerald-700";
+            cursorClass = "cursor-default";
+          }
+
+          if (isBooked) {
+            stateClass = "bg-gray-100 text-gray-400 line-through";
+            cursorClass = "cursor-not-allowed";
+          }
+
+          return (
+            <button
+              type="button"
+              key={day.key}
+              disabled={!interactive || !day.isCurrentMonth || !isAvailable}
+              onClick={() => handleDateClick(day.day, day.status)}
+              className={`${baseClass} ${stateClass} ${cursorClass}`}
+            >
+              {day.day}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Legend */}
-      <div className="flex justify-center gap-4 mt-3 pt-3 border-t border-emerald-100">
+      <div className="mt-3 flex justify-center gap-4 pt-3 border-t border-gray-100">
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded bg-emerald-500"></div>
-          <span className="text-[10px] text-gray-500 font-medium">
+          <div className="h-2.5 w-2.5 rounded-sm bg-emerald-500"></div>
+          <span className="text-[10px] font-medium text-gray-500">
             Available
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded bg-red-400"></div>
-          <span className="text-[10px] text-gray-500 font-medium">Booked</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded bg-white border border-gray-200"></div>
-          <span className="text-[10px] text-gray-500 font-medium">
-            No slots
-          </span>
+          <div className="h-2.5 w-2.5 rounded-sm bg-gray-300"></div>
+          <span className="text-[10px] font-medium text-gray-500">Booked</span>
         </div>
       </div>
     </div>
