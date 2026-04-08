@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import AppointmentBooked from "./pages/AppointmentBooked";
 import DoctorsList from "./pages/DoctorsList";
 import DoctorProfile from "./pages/DoctorProfile";
+import BookAppointment from "./pages/BookAppointment";
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/appointment" element={<AppointmentBooked />} />
           <Route path="/doctors" element={<DoctorsList />} />
           <Route path="/doctors/:id" element={<DoctorProfile />} />
+          <Route path="/book-appointment" element={<BookAppointment />} />
         </Routes>
       </div>
     </BrowserRouter>
