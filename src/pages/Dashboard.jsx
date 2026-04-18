@@ -5,7 +5,7 @@ import FollowUpsBox from '../components/FollowUpsBox';
 
 function Dashboard() {
   return (
-    <div className="min-h-screen bg-[#f1f5f9] px-4 sm:px-6 lg:px-10 py-6 md:py-8 font-sans">
+    <div className="min-h-screen bg-linear-to-b from-emerald-50 to-white px-4 sm:px-6 lg:px-10 py-6 md:py-8 font-sans">
       <div className="max-w-[1400px] mx-auto">
 
         {/* Modular Grid Layout */}
@@ -22,10 +22,10 @@ function Dashboard() {
               <div className="absolute top-[-30px] right-[-10px] w-48 h-48 bg-white/5 rounded-full pointer-events-none"></div>
 
               <div className="z-10 w-full">
-                <h2 className="text-white text-2xl md:text-[2rem] font-sans font-extrabold mb-2 tracking-tight">
+                <h2 className="text-white text-2xl md:text-[2rem] font-sans font-extrabold mb-4 tracking-tight">
                   Good morning , Sarah! <span className="text-2xl md:text-3xl">👋</span>
                 </h2>
-                <p className="text-[#aee0cf] text-sm md:text-base font-semibold mb-6">
+                <p className="text-[#aee0cf] text-sm md:text-base font-semibold mb-7">
                   Your health journey ,managed seemlessly
                 </p>
 
