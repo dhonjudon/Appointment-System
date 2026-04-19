@@ -6,7 +6,9 @@ function Navbar() {
   const location = useLocation();
   const currentPath = location.pathname;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
+if (currentPath === "/login" || currentPath === "/register") {
+    return null;
+  }
   return (
     <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-10 h-16 md:h-20 flex items-center justify-between">
@@ -34,12 +36,23 @@ function Navbar() {
             Appointments
           </Link>
 
-          <Link
-            to="#"
-            className="relative flex items-center text-[15px] font-bold transition-colors pb-1 text-gray-800 hover:text-[#388e7b]"
+          <Link 
+            to="/doctors" 
+            className={`relative flex items-center text-[15px] font-bold transition-colors pb-1 ${currentPath === '/doctors' ? 'text-[#388e7b] after:absolute after:bottom-0 after:left-0 after:w-full after:h-[2px] after:bg-[#388e7b]' : 'text-gray-800 hover:text-[#388e7b]'}`}
           >
+          
             Doctors
           </Link>
+          <Link 
+  to="/feedback" 
+  className={`relative flex items-center text-[15px] font-bold transition-colors pb-1 ${
+    currentPath === '/feedback'
+      ? 'text-[#388e7b] after:absolute after:bottom-0 after:left-0 after:w-full after:h-[2px] after:bg-[#388e7b]'
+      : 'text-gray-800 hover:text-[#388e7b]'
+  }`}
+>
+  Feedback
+</Link>
         </div>
 
         {/* Right Side Icons */}
@@ -130,6 +143,17 @@ function Navbar() {
           >
             Doctors
           </Link>
+          <Link 
+  to="/feedback" 
+  onClick={() => setIsMobileMenuOpen(false)}
+  className={`py-3 px-2 font-bold text-[15px] border-b border-gray-100 ${
+    currentPath === '/feedback'
+      ? 'text-[#388e7b]'
+      : 'text-gray-800'
+  }`}
+>
+  Feedback
+</Link>
         </div>
       </div>
     </nav>
