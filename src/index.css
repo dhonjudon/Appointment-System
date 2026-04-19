@@ -5,3 +5,13 @@
 body {
   font-family: 'Inter', sans-serif;
 }
+
+/* Hide scrollbars globally while keeping content scrollable */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
