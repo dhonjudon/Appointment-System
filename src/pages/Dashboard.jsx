@@ -1,14 +1,17 @@
 import React from 'react';
+// Importing reusable components used inside dashboard
 import InteractiveCalendar from '../components/InteractiveCalendar';
 import SchedulesBox from '../components/SchedulesBox';
 import FollowUpsBox from '../components/FollowUpsBox';
 
 function Dashboard() {
   return (
+    // Main container with full height and gradient background
     <div className="min-h-screen bg-linear-to-b from-emerald-50 to-white px-4 sm:px-6 lg:px-10 py-6 md:py-8 font-sans">
+       {/* Centered container with max width */}
       <div className="max-w-[1400px] mx-auto">
 
-        {/* Modular Grid Layout */}
+        {/* Modular Grid Layout (responsive) */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 mt-4">
 
           {/* LEFT COLUMN (Takes 7 cols on XL) */}
@@ -20,22 +23,26 @@ function Dashboard() {
               <div className="absolute -bottom-16 -right-16 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
               <div className="absolute -bottom-1/4 -right-8 w-64 h-64 bg-white/5 rounded-full pointer-events-none"></div>
               <div className="absolute top-[-30px] right-[-10px] w-48 h-48 bg-white/5 rounded-full pointer-events-none"></div>
-
+              {/* Banner Content */}
               <div className="z-10 w-full">
+                {/* Greeting text */}
                 <h2 className="text-white text-2xl md:text-[2rem] font-sans font-extrabold mb-4 tracking-tight">
                   Good morning , Sarah! <span className="text-2xl md:text-3xl">👋</span>
                 </h2>
+                {/* Subtitle */}
                 <p className="text-[#aee0cf] text-sm md:text-base font-semibold mb-7">
                   Your health journey ,managed seemlessly
                 </p>
-
+                {/* Action buttons */}
                 <div className="flex flex-wrap gap-4">
+                   {/* Find Doctor Button */}
                   <a href="#" className="bg-white text-[#115546] font-extrabold text-[13px] md:text-[14px] px-5 py-2.5 rounded-full flex items-center gap-2 hover:bg-gray-100 transition shadow-[0_4px_10px_rgba(0,0,0,0.1)]">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                     Find a Doctor
                   </a>
+                   {/* My Appointments Button */}
                   <a href="#" className="bg-white/20 hover:bg-white/30 text-white font-extrabold text-[13px] md:text-[14px] px-5 py-2.5 rounded-full flex items-center gap-2 transition border border-white/10">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
@@ -56,12 +63,13 @@ function Dashboard() {
                   </svg>
                 </div>
                 <div>
+                   {/* Data */}
                   <h3 className="text-[1.8rem] font-extrabold text-gray-900 leading-none mb-2">5</h3>
                   <p className="text-gray-500 font-bold text-[13px]">Total Visits</p>
                 </div>
               </div>
 
-              {/* Upcoming */}
+              {/* Upcoming card*/}
               <div className="bg-white rounded-[1.2rem] shadow-[0_4px_24px_rgba(0,0,0,0.04)] p-5 sm:p-6 flex flex-col justify-center gap-4 min-h-[140px]">
                 <div className="w-11 h-11 rounded-xl bg-[#e3f2ed] flex items-center justify-center text-[#2b8871]">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -74,7 +82,7 @@ function Dashboard() {
                 </div>
               </div>
 
-              {/* Completed */}
+              {/* Completed card*/}
               <div className="bg-white rounded-[1.2rem] shadow-[0_4px_24px_rgba(0,0,0,0.04)] p-5 sm:p-6 flex flex-col justify-center gap-4 min-h-[140px]">
                 <div className="w-11 h-11 rounded-xl bg-[#e3f2ed] flex items-center justify-center text-[#2b8871]">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -87,7 +95,7 @@ function Dashboard() {
                 </div>
               </div>
 
-              {/* Doctors Seen */}
+              {/* Doctors Seen card*/}
               <div className="bg-white rounded-[1.2rem] shadow-[0_4px_24px_rgba(0,0,0,0.04)] p-5 sm:p-6 flex flex-col justify-center gap-4 min-h-[140px]">
                 <div className="w-11 h-11 rounded-xl bg-[#e3f2ed] flex items-center justify-center text-[#2b8871]">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
@@ -103,7 +111,7 @@ function Dashboard() {
               </div>
             </div>
 
-            {/* Schedules & Follow Ups */}
+            {/* Schedules & Follow Ups components*/}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
               <SchedulesBox />
               <FollowUpsBox />
@@ -118,7 +126,7 @@ function Dashboard() {
               <h2 className="text-[1.25rem] font-extrabold text-[#115546]">Appointments(2)</h2>
               <span className="bg-[#e9ecef] text-gray-800 text-[11px] font-extrabold px-3 py-1.5 rounded-full">10 march 2026</span>
             </div>
-
+            {/* Calendar component */}
             <InteractiveCalendar />
 
             {/* Doctors Info Panel */}
@@ -163,17 +171,20 @@ function Dashboard() {
 
               {/* Bottom Actions */}
               <div className="flex gap-2">
+                 {/* Call button */}
                 <button className="w-10 h-10 rounded-[0.6rem] bg-[#388e7b] flex items-center justify-center text-white hover:bg-[#2b6a5b] transition">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
                   </svg>
                 </button>
+                {/* Message button */}
                 <button className="w-10 h-10 rounded-[0.6rem] bg-[#388e7b] flex items-center justify-center text-white hover:bg-[#2b6a5b] transition">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
                     <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z" />
                   </svg>
                 </button>
+                 {/* Book appointment button */}
                 <button className="flex-1 bg-gradient-to-r from-[#43a18a] to-[#1b6a55] text-white font-extrabold text-[13px] rounded-[0.6rem] hover:from-[#388e7b] hover:to-[#165544] transition flex items-center justify-center border-none shadow-[0_4px_10px_rgba(27,106,85,0.3)]">
                   + Book an Appointment
                 </button>

@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
+// Importing modal component for rescheduling
 import RescheduleModal from './RescheduleModal';
+// Importing logo image (not used here but available if needed)
 import logoImg from '../assets/logoimage.png';
 
 function AppointmentBooked() {
+  // State to control reschedule modal visibility
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
+  // State to track which FAQ is open (accordion behavior)
   const [openFaqIndex, setOpenFaqIndex] = useState(1);
-
+  // FAQ data (array of questions and answers)
   const faqs = [
     { question: "How much time does it take to confirm my appointment?", answer: "Usually within a few minutes of booking." },
     { question: "can i schedule my health checkup?", answer: "yes,you can reschedule your apointment .You cam so from the Booking history page and chat with our customer support team" },
@@ -13,12 +17,14 @@ function AppointmentBooked() {
   ];
 
   return (
+    // Main container with gradient background
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-white font-sans pb-20">
 
 
-
+       {/* Main content wrapper with padding */}
       <div className="px-6 lg:px-10 py-8">
         <div className="max-w-[1400px] mx-auto">
+           {/* Main grid layout */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
 
             {/* LEFT COLUMN */}
@@ -29,28 +35,32 @@ function AppointmentBooked() {
 
                 {/* Header section */}
                 <div className="flex items-center gap-4 mb-7">
+                  {/* Tick icon */}
                   <div className="w-[28px] h-[28px] rounded-full bg-[#2b8871] flex items-center justify-center text-white flex-shrink-0">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
+                  {/* Title and subtitle */}
                   <div className="flex items-baseline gap-4 w-full">
                     <h2 className="text-[1.3rem] font-extrabold text-[#2b8871] tracking-tight">Appointment Booked !</h2>
                     <p className="text-gray-600 text-[13px] font-bold">You will receive a confirmation mail shortly.</p>
                   </div>
                 </div>
-
+                {/* Divider */}
                 <hr className="border-[#dae9e7] mb-6" />
 
                 {/* Center Details */}
                 <div className="flex flex-col md:flex-row justify-between mb-8 gap-4">
+                  {/* Test center info */}
                   <div className="flex-1">
                     <p className="text-gray-400 font-extrabold text-[11px] tracking-wider mb-2 uppercase">Test Centre</p>
                     <h3 className="text-[18px] font-black text-gray-900 mb-0.5 leading-tight tracking-tight">Jan Sewa Diagonistic Centre</h3>
                     <p className="text-gray-500 text-[13px] font-extrabold">Baneshwor,Kathmandu,Bagmati Province</p>
                   </div>
-
+                    {/* Right side actions */}
                   <div className="flex flex-col items-end gap-5">
+                    {/* View location button */}
                     <button className="h-10 px-5 border-[1.5px] border-[#2b8871] text-[#2b8871] rounded-md flex items-center justify-center gap-2 hover:bg-[#f0f7f5] transition whitespace-nowrap self-start font-bold text-[13px] mt-1 shadow-sm">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -58,11 +68,12 @@ function AppointmentBooked() {
                       </svg>
                       View Location
                     </button>
-
+                     {/* Booking ID section */}
                     <div className="flex flex-col items-end">
                       <p className="text-[#8ac9ba] font-bold text-[11px] tracking-wider mb-2 uppercase">Booking ID</p>
                       <div className="flex items-center gap-2">
                         <span className="bg-[#eef2f5] text-gray-700 font-extrabold text-[12.5px] px-[12px] py-[4px] rounded-md tracking-wide">SS-2026-4823X</span>
+                        {/* Copy button */}
                         <button className="border border-[#7bc2b1] text-[#2b8871] font-bold text-[10.5px] px-[10px] py-[3px] rounded-[4px] hover:bg-gray-50 flex items-center gap-1 bg-white">
                           Copy
                         </button>
@@ -75,7 +86,9 @@ function AppointmentBooked() {
                 <div className="flex flex-col gap-8 mb-8">
                   <div>
                     <p className="text-[#8ac9ba] font-bold text-[11px] tracking-wider mb-3 uppercase">Booked For</p>
+                     {/* ===== PATIENT INFO ===== */}
                     <div className="flex flex-col gap-4">
+                       {/* Patient 1 */}
                       <div className="flex items-center gap-4">
                         <div className="w-[34px] h-[34px] rounded-full border-[1.5px] border-[#8ac9ba] text-[#2b8871] flex items-center justify-center text-[10px] font-black bg-white">RS</div>
                         <div className="leading-tight">
@@ -83,6 +96,7 @@ function AppointmentBooked() {
                           <p className="text-gray-400 text-[11px] font-bold">EKAPT483RNB</p>
                         </div>
                       </div>
+                      {/* Patient 2 */}
                       <div className="flex items-center gap-4">
                         <div className="w-[34px] h-[34px] rounded-full border-[1.5px] border-[#8ac9ba] text-[#2b8871] flex items-center justify-center text-[10px] font-black bg-white">SS</div>
                         <div className="leading-tight">
@@ -93,7 +107,7 @@ function AppointmentBooked() {
                     </div>
                   </div>
                 </div>
-
+                  {/* Divider */}
                 <hr className="border-[#dae9e7] mb-6" />
 
                 {/* Date, Time & Reschedule */}
