@@ -6,7 +6,7 @@ function Navbar() {
   const location = useLocation();
   const currentPath = location.pathname;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-if (currentPath === "/login" || currentPath === "/register") {
+  if (currentPath === "/login" || currentPath === "/register") {
     return null;
   }
   return (
@@ -36,23 +36,22 @@ if (currentPath === "/login" || currentPath === "/register") {
             Appointments
           </Link>
 
-          <Link 
-            to="/doctors" 
-            className={`relative flex items-center text-[15px] font-bold transition-colors pb-1 ${currentPath === '/doctors' ? 'text-[#388e7b] after:absolute after:bottom-0 after:left-0 after:w-full after:h-[2px] after:bg-[#388e7b]' : 'text-gray-800 hover:text-[#388e7b]'}`}
+          <Link
+            to="/doctors"
+            className={`relative flex items-center text-[15px] font-bold transition-colors pb-1 ${currentPath === "/doctors" ? "text-[#388e7b] after:absolute after:bottom-0 after:left-0 after:w-full after:h-[2px] after:bg-[#388e7b]" : "text-gray-800 hover:text-[#388e7b]"}`}
           >
-          
             Doctors
           </Link>
-          <Link 
-  to="/feedback" 
-  className={`relative flex items-center text-[15px] font-bold transition-colors pb-1 ${
-    currentPath === '/feedback'
-      ? 'text-[#388e7b] after:absolute after:bottom-0 after:left-0 after:w-full after:h-[2px] after:bg-[#388e7b]'
-      : 'text-gray-800 hover:text-[#388e7b]'
-  }`}
->
-  Feedback
-</Link>
+          <Link
+            to="/feedback"
+            className={`relative flex items-center text-[15px] font-bold transition-colors pb-1 ${
+              currentPath === "/feedback"
+                ? "text-[#388e7b] after:absolute after:bottom-0 after:left-0 after:w-full after:h-[2px] after:bg-[#388e7b]"
+                : "text-gray-800 hover:text-[#388e7b]"
+            }`}
+          >
+            Feedback
+          </Link>
         </div>
 
         {/* Right Side Icons */}
@@ -143,17 +142,15 @@ if (currentPath === "/login" || currentPath === "/register") {
           >
             Doctors
           </Link>
-          <Link 
-  to="/feedback" 
-  onClick={() => setIsMobileMenuOpen(false)}
-  className={`py-3 px-2 font-bold text-[15px] border-b border-gray-100 ${
-    currentPath === '/feedback'
-      ? 'text-[#388e7b]'
-      : 'text-gray-800'
-  }`}
->
-  Feedback
-</Link>
+          <Link
+            to="/feedback"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className={`py-3 px-2 font-bold text-[15px] border-b border-gray-100 ${
+              currentPath === "/feedback" ? "text-[#388e7b]" : "text-gray-800"
+            }`}
+          >
+            Feedback
+          </Link>
         </div>
       </div>
     </nav>
