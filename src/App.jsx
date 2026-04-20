@@ -5,24 +5,89 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import AppointmentBooked from "./pages/AppointmentBooked";
-import DoctorsList from "./pages/DoctorsList";
 import DoctorProfile from "./pages/DoctorProfile";
 import BookAppointment from "./pages/BookAppointment";
-
+import AppointmentConfirm from "./pages/AppointmentConform";
+import DoctorsList from "./pages/DoctorsList";
+import Onboarding from "./pages/onboarding";
+import Appointments from "./pages/Appointments";
+import Profile from "./pages/profile";
 function App() {
   return (
     <BrowserRouter>
       <div className="bg-gray-50 min-h-screen">
-        <Navbar />
         <Routes>
           <Route path="/" element={<Navigate to="/login" />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/appointment" element={<AppointmentBooked />} />
-          <Route path="/doctors" element={<DoctorsList />} />
-          <Route path="/doctors/:id" element={<DoctorProfile />} />
-          <Route path="/book-appointment" element={<BookAppointment />} />
+          <Route path="/onboarding" element={<Onboarding />} />
+          
+          {/* Routes with Navbar */}
+          <Route
+            path="/doctors"
+            element={
+              <>
+                <Navbar />
+                <DoctorsList />
+              </>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <>
+                <Navbar />
+                <Dashboard />
+              </>
+            }
+          />
+          <Route
+            path="/doctors/:id"
+            element={
+              <>
+                <Navbar />
+                <DoctorProfile />
+              </>
+            }
+          />
+          <Route
+            path="/book-appointment"
+            element={
+              <>
+                <Navbar />
+                <BookAppointment />
+              </>
+            }
+          />
+          <Route
+            path="/appointment-confirm"
+            element={
+              <>
+                <Navbar />
+                <AppointmentConfirm />
+              </>
+            }
+          />
+          <Route
+            path="/appointment"
+            element={
+              <>
+                <Navbar />
+                <Appointments />
+              </>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <>
+                <Navbar />
+                <Profile />
+              </>
+            }
+          />
+          <Route path="/appointment" element={<Appointments />} />
+          <Route path="/profile" element={<Profile />} />
         </Routes>
       </div>
     </BrowserRouter>

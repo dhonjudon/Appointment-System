@@ -1,33 +1,26 @@
-// DEPENDENCIES & CONFIGURATION
+const express = require("express");
+const cors = require("cors");
+const bcrypt = require("bcrypt");
+const { Pool } = require("pg");
+require("dotenv").config();
 
-const express = require("express"); // Import Express framework for building the server
-const cors = require("cors"); // Import CORS to allow cross-origin requests
-const bcrypt = require("bcrypt"); // Import bcrypt for password hashing and security
-const { Pool } = require("pg"); // Import PostgreSQL Pool for database connection
-require("dotenv").config(); // Load environment variables from .env file
+const router = express.Router();
+router.use(cors());
+router.use(express.json());
 
-const router = express.Router(); // Create a new Express router instance
-router.use(cors()); // Enable CORS for all routes in this router
-router.use(express.json()); // Parse incoming JSON requests
-
-// Create a PostgreSQL connection pool with config or fallback defaults
 const pool = new Pool({
   user: process.env.PGUSER || "sasika",
   password: process.env.PGPASSWORD || "1903sasika400",
   host: process.env.PGHOST || "localhost",
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || "doctor_appointment_system",
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 5000, // Timeout if connection takes too long
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
 });
 
-// List of appointment statuses considered "active"
 const APPOINTMENT_ACTIVE_STATUSES = ["pending", "confirmed", "rescheduled"];
 
-// UTILITY FUNCTIONS
-
-// Send standardized success response
 const sendSuccess = (res, statusCode, message, data = {}) => {
   res.status(statusCode).json({
     success: true,
@@ -36,7 +29,6 @@ const sendSuccess = (res, statusCode, message, data = {}) => {
   });
 };
 
-// Send standardized error response
 const sendError = (res, statusCode, message, error = null) => {
   const payload = {
     success: false,
@@ -50,7 +42,6 @@ const sendError = (res, statusCode, message, error = null) => {
   res.status(statusCode).json(payload);
 };
 
-// Wrap async route handlers to catch errors
 const asyncHandler = (handler) => async (req, res, next) => {
   try {
     await handler(req, res, next);
@@ -59,7 +50,6 @@ const asyncHandler = (handler) => async (req, res, next) => {
   }
 };
 
-// Parse and validate pagination parameters
 const parsePagination = (query = {}) => {
   const page = Math.max(1, Number(query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
@@ -68,7 +58,6 @@ const parsePagination = (query = {}) => {
   return { page, limit, offset };
 };
 
-// Create and insert a notification for a user
 const createNotification = async (
   userId,
   title,
@@ -85,7 +74,6 @@ const createNotification = async (
   );
 };
 
-// Convert and validate numeric IDs from query/request parameters
 const normalizeNumericId = (value) => {
   const numericValue = Number(value);
   if (!Number.isInteger(numericValue) || numericValue <= 0) {
@@ -95,9 +83,6 @@ const normalizeNumericId = (value) => {
   return numericValue;
 };
 
-// SERVICE LAYER
-
-// Authentication service: handles user registration and login
 const authService = {
   registerUser: async ({ email, password, role = "user" }) => {
     const allowedRoles = ["user", "doctor", "admin"];
@@ -151,7 +136,6 @@ const authService = {
   },
 };
 
-// User profile service: manages user profile data
 const profileService = {
   createProfile: async (payload) => {
     const {
@@ -279,7 +263,6 @@ const profileService = {
   },
 };
 
-// Doctor service: manages doctor profiles, schedules, and availability
 const doctorService = {
   getAllDoctors: async ({
     specializationId,
@@ -502,7 +485,6 @@ doctorService.addDoctor = async (payload) => {
   }
 };
 
-// Appointment service: handles booking, cancellation, and rescheduling
 const appointmentService = {
   bookAppointment: async ({
     user_id,
@@ -516,7 +498,6 @@ const appointmentService = {
   }) => {
     const client = await pool.connect();
     try {
-      // using transaction to ensure data consistency and concurrency control
       await client.query("BEGIN");
 
       const doctorLock = await client.query(
@@ -524,52 +505,58 @@ const appointmentService = {
         [doctor_id],
       );
       if (!doctorLock.rowCount) {
-        throw new Error("Doctor not found");
+        const error = new Error("Doctor not found");
+        error.statusCode = 404;
+        throw error;
       }
 
-      const scheduleResult = await client.query(
-        `
-					SELECT id
-					FROM doctor_schedules
-					WHERE id = $1
-						AND doctor_id = $2
-						AND is_active = TRUE
-            AND day_of_week::int = EXTRACT(DOW FROM $3::date)::int
-						AND start_time <= $4::time
-						AND end_time >= $5::time
-				`,
-        [schedule_id, doctor_id, appointment_date, start_time, end_time],
-      );
+      //     const scheduleResult = await client.query(
+      //       `
+      //   SELECT id
+      //   FROM doctor_schedules
+      //   WHERE id = $1
+      //     AND doctor_id = $2
+      //     AND is_active = TRUE
+      //     AND day_of_week = TO_CHAR($3::date, 'FMDay')
+      //     AND start_time <= $4::time
+      //     AND end_time >= $5::time
+      // `,
+      //       [schedule_id, doctor_id, appointment_date, start_time, end_time],
+      //     );
 
-      if (!scheduleResult.rowCount) {
-        throw new Error(
-          "Selected schedule is not available for the requested slot",
-        );
-      }
+      //     if (!scheduleResult.rowCount) {
+      //       const error = new Error(
+      //         "Selected schedule is not available for the requested slot",
+      //       );
+      //       error.statusCode = 400;
+      //       throw error;
+      //     }
 
-      const overlapResult = await client.query(
-        `
-					SELECT id
-					FROM appointments
-					WHERE doctor_id = $1
-						AND appointment_date = $2
-						AND status = ANY($3::appointment_status[])
-						AND NOT (end_time <= $4::time OR start_time >= $5::time)
-					FOR UPDATE
-				`,
-        [
-          doctor_id,
-          appointment_date,
-          APPOINTMENT_ACTIVE_STATUSES,
-          start_time,
-          end_time,
-        ],
-      );
+      //     const overlapResult = await client.query(
+      //       `
+      // 				SELECT id
+      // 				FROM appointments
+      // 				WHERE doctor_id = $1
+      // 					AND appointment_date = $2
+      // 					AND status = ANY($3::appointment_status[])
+      // 					AND NOT (end_time <= $4::time OR start_time >= $5::time)
+      // 				FOR UPDATE
+      // 			`,
+      //       [
+      //         doctor_id,
+      //         appointment_date,
+      //         APPOINTMENT_ACTIVE_STATUSES,
+      //         start_time,
+      //         end_time,
+      //       ],
+      //     );
 
-      if (overlapResult.rowCount) {
-        throw new Error("Time slot is already booked");
-      }
-
+      // if (overlapResult.rowCount) {
+      //   const error = new Error("Time slot is already booked");
+      //   error.statusCode = 409;
+      //   throw error;
+      // }
+      console.log("schedule_id:", schedule_id);
       const insertResult = await client.query(
         `
 					INSERT INTO appointments (
@@ -811,7 +798,6 @@ const appointmentService = {
   },
 };
 
-// Medical history service: manages patient medical records
 const medicalService = {
   addMedicalHistory: async (payload) => {
     const {
@@ -906,7 +892,6 @@ const medicalService = {
   },
 };
 
-// Payment service: handles payment creation and verification
 const paymentService = {
   createPayment: async ({
     appointment_id,
@@ -964,7 +949,6 @@ const paymentService = {
   },
 };
 
-// Notification service: manages user notifications
 const notificationService = {
   getUserNotifications: async ({ userId, page, limit, offset }) => {
     const [listResult, countResult] = await Promise.all([
@@ -1017,7 +1001,6 @@ const notificationService = {
   },
 };
 
-// Review service: handles doctor reviews and ratings
 const reviewService = {
   addDoctorReview: async ({
     doctor_id,
@@ -1072,9 +1055,6 @@ const reviewService = {
   },
 };
 
-// CONTROLLER LAYER
-
-// Authentication controller: handles register and login endpoints
 const authController = {
   registerUser: asyncHandler(async (req, res) => {
     const { email, password, role } = req.body;
@@ -1105,7 +1085,6 @@ const authController = {
   }),
 };
 
-// Profile controller: handles user profile endpoints
 const profileController = {
   createProfile: asyncHandler(async (req, res) => {
     const userId = normalizeNumericId(req.body.user_id);
@@ -1153,7 +1132,6 @@ const profileController = {
   }),
 };
 
-// Doctor controller: handles doctor listing and details endpoints
 const doctorController = {
   getAllDoctors: asyncHandler(async (req, res) => {
     const specializationId = req.query.specialization_id
@@ -1228,7 +1206,6 @@ doctorController.addDoctor = asyncHandler(async (req, res) => {
   sendSuccess(res, 201, "Doctor created successfully", doctor);
 });
 
-// Appointment controller: handles appointment booking and management endpoints
 const appointmentController = {
   bookAppointment: asyncHandler(async (req, res) => {
     const payload = {
@@ -1361,7 +1338,6 @@ const appointmentController = {
   }),
 };
 
-// Medical history controller: handles medical record endpoints
 const medicalController = {
   addMedicalHistory: asyncHandler(async (req, res) => {
     const userId = normalizeNumericId(req.body.user_id);
@@ -1430,7 +1406,6 @@ const medicalController = {
   }),
 };
 
-// Payment controller: handles payment endpoints
 const paymentController = {
   createPayment: asyncHandler(async (req, res) => {
     const payload = {
@@ -1477,7 +1452,6 @@ const paymentController = {
   }),
 };
 
-// Notification controller: handles notification endpoints
 const notificationController = {
   getUserNotifications: asyncHandler(async (req, res) => {
     const userId = normalizeNumericId(req.params.userId);
@@ -1519,7 +1493,6 @@ const notificationController = {
   }),
 };
 
-// Review controller: handles doctor review endpoints
 const reviewController = {
   addDoctorReview: asyncHandler(async (req, res) => {
     const payload = {
@@ -1551,18 +1524,13 @@ const reviewController = {
   }),
 };
 
-// API ROUTES
-
-// Authentication routes
 router.post("/auth/register", authController.registerUser);
 router.post("/auth/login", authController.loginUser);
 
-// Profile routes
 router.post("/profile", profileController.createProfile);
 router.put("/profile/:userId", profileController.updateProfile);
 router.get("/profile/:userId", profileController.getProfile);
 
-// Doctor routes
 router.get("/doctors", doctorController.getAllDoctors);
 router.get("/doctors/:doctorId", doctorController.getDoctorDetails);
 router.get(
@@ -1570,7 +1538,6 @@ router.get(
   doctorController.getAvailableSchedules,
 );
 
-// Appointment routes
 router.post("/appointments", appointmentController.bookAppointment);
 router.patch(
   "/appointments/:appointmentId/cancel",
@@ -1589,7 +1556,6 @@ router.get(
   appointmentController.getCompletedAppointments,
 );
 
-// Medical history routes
 router.post("/medical-history", medicalController.addMedicalHistory);
 router.put("/medical-history/:userId", medicalController.updateMedicalHistory);
 router.patch(
@@ -1597,11 +1563,9 @@ router.patch(
   medicalController.toggleMedicalVisibility,
 );
 
-// Payment routes
 router.post("/payments", paymentController.createPayment);
 router.patch("/payments/:paymentId/verify", paymentController.verifyPayment);
 
-// Notification routes
 router.get(
   "/users/:userId/notifications",
   notificationController.getUserNotifications,
@@ -1611,12 +1575,8 @@ router.patch(
   notificationController.markNotificationAsRead,
 );
 
-// Review and Doctor admin routes
 router.post("/reviews", reviewController.addDoctorReview);
 router.post("/doctors", doctorController.addDoctor);
-
-// EXPORTS
-
 module.exports = {
   pool,
   router,

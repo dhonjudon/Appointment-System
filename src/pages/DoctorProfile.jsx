@@ -1,100 +1,250 @@
-import React, { useEffect, useState } from "react";
+// DoctorProfile.jsx
+// Displays detailed doctor information with interactive appointment booking calendar
+// Features: doctor profile sidebar, professional overview, services, and date picker
+
+import React, { useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import MiniCalendar from "../components/MiniCalendar";
+import {
+  ArrowLeft,
+  Star,
+  MapPin,
+  Building2,
+  Clock,
+  Phone,
+  Mail,
+  GraduationCap,
+  BadgeCheck,
+  Stethoscope,
+  Heart,
+  ClipboardList,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+  Loader2,
+  ShieldCheck,
+} from "lucide-react";
 
-const defaultDoctor = {
-  id: 1,
-  name: "Dr. Anna Kowalski",
-  specialty: "ENT Specialist",
-  education: "Warsaw Medical Academy",
-  qualifications: ["MD (Otolaryngology)", "Fellowship in Pediatric ENT"],
-  hospital: "St. Mary Multispeciality Hospital",
-  location: "Downtown Medical District",
-  phone: "+48 22 100 2000",
-  email: "anna.kowalski@stmarycare.com",
-  consultationModes: ["In-person", "Video Consultation"],
-  rating: 4.87,
-  reviews: 124,
-  patientsTreated: 3200,
-  responseTime: "Replies in under 1 hour",
-  nextAvailable: "Today, 2:00 PM",
-  experience: "12 years",
-  languages: ["English", "Polish", "German"],
-  about:
-    "Dr. Anna Kowalski is a highly experienced ENT specialist with over 12 years of practice. She specializes in treating disorders of the ear, nose, and throat, with particular expertise in pediatric ENT conditions and minimally invasive sinus surgery.",
-  services: [
-    "Endoscopic sinus evaluation",
-    "Pediatric ear infection treatment",
-    "Sleep apnea screening",
-    "Hearing loss consultation",
-  ],
-  conditionsTreated: [
-    "Sinusitis",
-    "Tonsillitis",
-    "Vertigo",
-    "Nasal polyps",
-    "Allergic rhinitis",
-  ],
+// ─── Configuration & Utilities ───
+const API = "http://localhost:3000/api";
+const cx = (...a) => a.filter(Boolean).join(" "); // Classname combiner (removes falsy values)
+const getToken = () => localStorage.getItem("token") || "";
+const authApi = () =>
+  axios.create({ headers: { Authorization: `Bearer ${getToken()}` } }); // Authenticated API requests
+
+// Day of week mapping: string labels and name-to-index conversion
+const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_NAME_TO_INDEX = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+// Convert day value (number or string) to day-of-week index (0-6)
+const normalizeScheduleDay = (value) => {
+  const numericValue = Number(value);
+  if (
+    Number.isInteger(numericValue) &&
+    numericValue >= 0 &&
+    numericValue <= 6
+  ) {
+    return numericValue;
+  }
+
+  const key = String(value || "")
+    .trim()
+    .toLowerCase();
+  return Object.prototype.hasOwnProperty.call(DAY_NAME_TO_INDEX, key)
+    ? DAY_NAME_TO_INDEX[key]
+    : null;
+};
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const DEFAULTS = {
+  name: "—",
+  specialty: "—",
+  hospital: "—",
+  location: "—",
+  email: "—",
+  rating: 0,
+  reviews: 0,
+  experience: "—",
+  consultationFee: 0,
+  about: "No biography provided.",
+  qualifications: [],
+  services: [],
+  conditionsTreated: [],
   feeIncludes: [
     "Doctor consultation",
     "Digital prescription",
     "7-day follow-up chat",
   ],
-  consultationFee: 150,
-  availableDates: [2, 4, 7, 9, 11, 14, 16, 18, 21, 23, 25, 28, 30],
-  bookedDates: [3, 10, 17, 24],
-  timeSlotsMorning: ["9:00 AM", "10:00 AM", "11:30 AM"],
-  timeSlotsAfternoon: ["1:00 PM", "2:00 PM", "3:30 PM"],
-  timeSlotsEvening: ["5:00 PM", "6:30 PM"],
+  hospitals: [],
+  consultationModes: ["In-person"],
 };
 
-const mapSchedulesToDates = (schedules = []) => {
-  if (!Array.isArray(schedules) || !schedules.length) {
-    return {
-      availableDates: defaultDoctor.availableDates,
-      bookedDates: defaultDoctor.bookedDates,
-    };
-  }
+// Main component: displays doctor profile with booking calendar
+export default function DoctorProfile() {
+  const { id } = useParams();
+  const navigate = useNavigate();
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const scheduleDays = new Set(
-    schedules
-      .map((slot) => Number(slot.day_of_week))
-      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
-  );
+  // State management
+  const [doctor, setDoctor] = useState(null); // Doctor profile data
+  const [schedules, setSchedules] = useState([]); // Available schedule slots
+  const [booked, setBooked] = useState([]); // Booked appointment times
+  const [loading, setLoading] = useState(true);
 
-  const availableDates = [];
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    const date = new Date(year, month, day);
-    if (scheduleDays.has(date.getDay())) {
-      availableDates.push(day);
+  // Calendar navigation: tracks the month being viewed
+  const [calMonth, setCalMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+
+  // Fetch doctor profile and schedules on mount
+  useEffect(() => {
+    const doctorId = Number(id);
+    if (!Number.isInteger(doctorId) || doctorId <= 0) {
+      setLoading(false);
+      return;
     }
-  }
 
-  return {
-    availableDates: availableDates.length
-      ? availableDates
-      : defaultDoctor.availableDates,
-    bookedDates: defaultDoctor.bookedDates,
-  };
-};
+    let mounted = true;
 
-const mapDoctorApiToViewModel = (doctorApi = {}, schedules = []) => {
-  const firstName = doctorApi.first_name || "";
-  const lastName = doctorApi.last_name || "";
-  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
-  const displayName = fullName ? `Dr. ${fullName}` : defaultDoctor.name;
+    (async () => {
+      try {
+        // Fetch doctor profile and available schedules in parallel
+        const [drRes, schRes] = await Promise.allSettled([
+          authApi().get(`${API}/doctors/${doctorId}`),
+          authApi().get(`${API}/doctors/${doctorId}/schedules`),
+        ]);
 
-  const primaryHospital = Array.isArray(doctorApi.hospitals)
-    ? doctorApi.hospitals.find((hospital) => hospital?.is_primary) ||
-      doctorApi.hospitals[0]
+        if (!mounted) return;
+
+        if (drRes.status === "fulfilled") {
+          const d = drRes.value.data?.data || {};
+          setDoctor(d);
+        } else {
+          console.error("Doctor fetch failed:", drRes.reason);
+        }
+
+        if (schRes.status === "fulfilled") {
+          const rawSchedules = schRes.value.data?.data?.schedules || [];
+          const rawBooked = schRes.value.data?.data?.booked_slots || [];
+          setSchedules(rawSchedules);
+          setBooked(rawBooked);
+        } else {
+          console.error("Schedules fetch failed:", schRes.reason);
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  // Compute set of days with available schedules (used for calendar marking)
+  const scheduledDows = useMemo(() => {
+    return new Set(
+      schedules
+        .map((s) => {
+          const d = normalizeScheduleDay(s?.day_of_week);
+          return d;
+        })
+        .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
+    );
+  }, [schedules]);
+
+  // Generate calendar grid: compute week rows and day cells with states
+  const { calDays, monthLabel } = useMemo(() => {
+    const y = calMonth.getFullYear();
+    const m = calMonth.getMonth();
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const prevDays = new Date(y, m, 0).getDate();
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const cells = [];
+
+    // Pad start with previous month days (grayed out)
+    for (let i = firstDow - 1; i >= 0; i--) {
+      cells.push({ day: prevDays - i, cur: false, state: "outside" });
+    }
+
+    // Add days of current month with state: available/past/none
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(y, m, d);
+      const isPast = date < today;
+      const dow = date.getDay();
+      const hasSchedule = scheduledDows.has(dow);
+
+      let state = "none"; // No schedule this day
+      if (!isPast && hasSchedule) {
+        state = "available"; // Has schedule and not in the past
+      }
+      if (isPast) state = "past"; // Past date (non-clickable)
+
+      cells.push({ day: d, cur: true, state, date });
+    }
+
+    // Pad end with next month days to fill final week
+    let tail = 1;
+    while (cells.length % 7 !== 0) {
+      cells.push({ day: tail++, cur: false, state: "outside" });
+    }
+
+    // Group cells into weeks
+    const weeks = [];
+    for (let r = 0; r < cells.length / 7; r++) {
+      weeks.push(cells.slice(r * 7, r * 7 + 7));
+    }
+
+    return {
+      calDays: weeks,
+      monthLabel: `${MONTH_NAMES[m]} ${y}`,
+    };
+  }, [calMonth, scheduledDows]);
+
+  const d = doctor || {};
+  const fullName = [d.first_name, d.last_name].filter(Boolean).join(" ");
+  const displayName = fullName ? `Dr. ${fullName}` : DEFAULTS.name;
+  const initials =
+    fullName
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "DR";
+
+  // Primary hospital from the hospitals array returned by the API
+  const primaryHospital = Array.isArray(d.hospitals)
+    ? d.hospitals.find((h) => h.is_primary) || d.hospitals[0]
     : null;
 
-  const location = [
+  const hospitalName = primaryHospital?.name || DEFAULTS.hospital;
+  const hospitalAddr = [
     primaryHospital?.address_line1,
     primaryHospital?.city,
     primaryHospital?.state,
@@ -102,558 +252,446 @@ const mapDoctorApiToViewModel = (doctorApi = {}, schedules = []) => {
     .filter(Boolean)
     .join(", ");
 
-  const yearsOfExperience = Number(doctorApi.years_of_experience);
-  const rating = Number(doctorApi.average_rating);
-  const reviewCount = Number(doctorApi.total_reviews);
-  const consultationFee = Number(doctorApi.consultation_fee);
-  const scheduleDates = mapSchedulesToDates(schedules);
+  const rating = Number(d.average_rating) || DEFAULTS.rating;
+  const reviews = Number(d.total_reviews) || DEFAULTS.reviews;
+  const experience =
+    d.years_of_experience != null
+      ? `${d.years_of_experience} yrs`
+      : DEFAULTS.experience;
+  const fee = Number(d.consultation_fee) || DEFAULTS.consultationFee;
+  const bio = d.bio || DEFAULTS.about;
+  const specialty = d.specialization_name || DEFAULTS.specialty;
 
-  return {
-    ...defaultDoctor,
-    id: doctorApi.id || defaultDoctor.id,
-    name: displayName,
-    specialty: doctorApi.specialization_name || defaultDoctor.specialty,
-    hospital: primaryHospital?.name || defaultDoctor.hospital,
-    location: location || defaultDoctor.location,
-    email: doctorApi.email || defaultDoctor.email,
-    rating:
-      Number.isFinite(rating) && rating > 0 ? rating : defaultDoctor.rating,
-    reviews:
-      Number.isFinite(reviewCount) && reviewCount >= 0
-        ? reviewCount
-        : defaultDoctor.reviews,
-    experience:
-      Number.isFinite(yearsOfExperience) && yearsOfExperience >= 0
-        ? `${yearsOfExperience} years`
-        : defaultDoctor.experience,
-    consultationFee:
-      Number.isFinite(consultationFee) && consultationFee > 0
-        ? consultationFee
-        : defaultDoctor.consultationFee,
-    about: doctorApi.bio || defaultDoctor.about,
-    qualifications: doctorApi.license_number
-      ? [
-          defaultDoctor.qualifications[0],
-          `License: ${doctorApi.license_number}`,
-        ]
-      : defaultDoctor.qualifications,
-    availableDates: scheduleDates.availableDates,
-    bookedDates: scheduleDates.bookedDates,
-  };
-};
+  // Build qualifications: show license number if available
+  const qualifications = d.license_number
+    ? [`License No: ${d.license_number}`, "MBBS", "MD"]
+    : ["MBBS", "MD"];
 
-function DoctorProfile() {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const [doctor, setDoctor] = useState(defaultDoctor);
-  const [schedules, setSchedules] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const doctorId = Number(id);
-
-    if (!Number.isInteger(doctorId) || doctorId <= 0) {
-      setLoading(false);
-      return;
-    }
-
-    let isMounted = true;
-
-    const fetchDoctorProfile = async () => {
-      try {
-        const [doctorResult, schedulesResult] = await Promise.allSettled([
-          axios.get(`http://localhost:3000/api/doctors/${doctorId}`),
-          axios.get(`http://localhost:3000/api/doctors/${doctorId}/schedules`),
-        ]);
-
-        if (doctorResult.status === "fulfilled") {
-          const doctorPayload = doctorResult.value?.data?.data || {};
-          const schedulePayload =
-            schedulesResult.status === "fulfilled"
-              ? schedulesResult.value?.data?.data?.schedules || []
-              : [];
-          const mappedDoctor = mapDoctorApiToViewModel(
-            doctorPayload,
-            schedulePayload,
-          );
-
-          if (isMounted) {
-            setDoctor(mappedDoctor);
-          }
-        } else {
-          console.error("Error fetching doctor profile:", doctorResult.reason);
-        }
-
-        if (schedulesResult.status === "fulfilled") {
-          const schedulePayload = schedulesResult.value?.data?.data?.schedules;
-          if (isMounted) {
-            setSchedules(Array.isArray(schedulePayload) ? schedulePayload : []);
-          }
-        } else {
-          console.error(
-            "Error fetching doctor schedules:",
-            schedulesResult.reason,
-          );
-          if (isMounted) {
-            setSchedules([]);
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching doctor profile:", error);
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchDoctorProfile();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [id]);
-
-  const initials = doctor.name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2);
-
-  const handleBookAppointment = () => {
+  const handleBookNow = () => {
     navigate("/book-appointment", {
       state: {
-        doctor,
+        doctor: {
+          id: d.id,
+          name: displayName,
+          specialty,
+          hospital: hospitalName,
+          hospital_id: primaryHospital?.id || null,
+          schedule_id: schedules[0]?.id || null,
+          rating,
+          reviews,
+          consultationFee: fee,
+          image: null,
+        },
+        schedules,
       },
     });
   };
 
-  const totalDates = doctor.availableDates.length + doctor.bookedDates.length;
-  const availabilityScore = totalDates
-    ? Math.round((doctor.availableDates.length / totalDates) * 100)
-    : 0;
-  const scheduleDays = Array.from(
-    new Set(
-      schedules
-        .map((slot) => Number(slot.day_of_week))
-        .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
-    ),
-  );
-  const dynamicAvailabilityScore = scheduleDays.length
-    ? Math.round((scheduleDays.length / 7) * 100)
-    : availabilityScore;
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-emerald-50">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 text-emerald-500 animate-spin mx-auto mb-3" />
+          <p className="text-gray-500 text-sm">Loading doctor profile…</p>
+        </div>
+      </div>
+    );
+  }
 
-  if (loading) return <p className="p-6 text-gray-500">Loading profile...</p>;
-
+  // ─── Render ───
   return (
-    <div className="h-screen overflow-hidden bg-linear-to-b from-emerald-50 to-white flex">
-      {/* Fixed Sidebar - Doctor Info */}
-      <div className="w-80 shrink-0 bg-white border-r border-emerald-100 h-screen overflow-y-auto">
+    <div
+      className="h-screen overflow-hidden bg-gradient-to-b from-emerald-50 to-white flex"
+      style={{ fontFamily: "'DM Sans', 'Segoe UI', sans-serif" }}
+    >
+      {/* Sidebar: doctor profile info and credentials */}
+      <aside className="w-80 shrink-0 bg-white border-r border-emerald-100 h-screen overflow-y-auto">
         <div className="p-6">
-          {/* Doctor Avatar & Name */}
+          {/* Profile avatar and basic info */}
           <div className="text-center mb-6">
-            <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-2xl bg-linear-to-br from-emerald-500 to-emerald-600 text-3xl font-bold text-white shadow-lg shadow-emerald-100">
+            <div className="mx-auto mb-4 w-24 h-24 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-700 flex items-center justify-center text-white text-3xl font-bold shadow-lg shadow-emerald-100">
               {initials}
             </div>
-            <h1 className="text-xl font-bold text-gray-800 mb-1">
-              {doctor.name}
+            <h1 className="text-xl font-bold text-gray-800 mb-0.5">
+              {displayName}
             </h1>
-            <p className="text-emerald-600 font-medium text-sm">
-              {doctor.specialty}
+            <p className="text-emerald-600 font-semibold text-sm">
+              {specialty}
             </p>
           </div>
 
-          {/* Rating & Stats */}
+          {/* Stats grid */}
           <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className="bg-gray-50 rounded-xl p-3 text-center">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <svg
-                  className="w-4 h-4 text-amber-400"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                </svg>
-                <span className="font-bold text-gray-800">{doctor.rating}</span>
+            <div className="bg-amber-50 rounded-xl p-3 text-center border border-amber-100">
+              <div className="flex items-center justify-center gap-1 mb-0.5">
+                <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+                <span className="font-bold text-gray-800 text-sm">
+                  {rating.toFixed(2)}
+                </span>
               </div>
-              <p className="text-xs text-gray-500">{doctor.reviews} reviews</p>
+              <p className="text-xs text-gray-500">{reviews} reviews</p>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3 text-center">
-              <p className="font-bold text-gray-800">{doctor.experience}</p>
+            <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+              <p className="font-bold text-gray-800 text-sm">{experience}</p>
               <p className="text-xs text-gray-500">Experience</p>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3 text-center">
-              <p className="font-bold text-gray-800">
-                {doctor.patientsTreated}+
+            <div className="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100 col-span-2">
+              <p className="font-bold text-emerald-600 text-lg">
+                Rs {fee.toLocaleString()}
               </p>
-              <p className="text-xs text-gray-500">Patients</p>
-            </div>
-            <div className="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
-              <p className="font-bold text-emerald-600">
-                RS{doctor.consultationFee}
-              </p>
-              <p className="text-xs text-gray-500">Per visit</p>
+              <p className="text-xs text-gray-500">Consultation fee</p>
             </div>
           </div>
 
-          {/* Quick Info */}
-          <div className="space-y-3 mb-6">
-            <div className="flex items-start gap-3 text-sm">
-              <svg
-                className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                />
-              </svg>
-              <div>
-                <p className="font-medium text-gray-800">{doctor.hospital}</p>
-                <p className="text-gray-500 text-xs">{doctor.location}</p>
+          {/* Hospital affiliation — from real API data */}
+          <div className="mb-5">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">
+              Hospital Affiliation
+            </p>
+            {primaryHospital ? (
+              <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <Building2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-semibold text-gray-800 text-sm">
+                    {hospitalName}
+                  </p>
+                  {hospitalAddr && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {hospitalAddr}
+                    </p>
+                  )}
+                  {primaryHospital.is_primary && (
+                    <span className="inline-block mt-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                      Primary
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 italic">Not specified</p>
+            )}
+
+            {/* All affiliated hospitals if more than one */}
+            {Array.isArray(d.hospitals) && d.hospitals.length > 1 && (
+              <div className="mt-2 space-y-1.5">
+                {d.hospitals.slice(1).map((h) => (
+                  <div
+                    key={h.id}
+                    className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs text-gray-600"
+                  >
+                    <Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    {h.name}
+                    {h.city && (
+                      <span className="text-gray-400">· {h.city}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Credentials / Education */}
+          <div className="mb-5">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">
+              Credentials
+            </p>
+            <div className="space-y-1.5">
+              {qualifications.map((q) => (
+                <div
+                  key={q}
+                  className="flex items-center gap-2 text-sm text-gray-700"
+                >
+                  <BadgeCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                  {q}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Contact */}
+          {d.email && (
+            <div className="mb-5">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">
+                Contact
+              </p>
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <Mail className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="truncate">{d.email}</span>
               </div>
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              <svg
-                className="w-4 h-4 text-emerald-500 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342"
-                />
-              </svg>
-              <p className="text-gray-600">{doctor.education}</p>
-            </div>
-          </div>
+          )}
 
-          {/* Consultation Modes */}
+          {/* Consultation modes */}
           <div className="mb-6">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">
               Available Modes
             </p>
             <div className="flex flex-wrap gap-2">
-              {doctor.consultationModes.map((mode) => (
+              {DEFAULTS.consultationModes.map((mode) => (
                 <span
                   key={mode}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
-                    mode === "Video Consultation"
-                      ? "bg-blue-50 text-blue-600 border border-blue-100"
-                      : "bg-emerald-50 text-emerald-600 border border-emerald-100"
-                  }`}
+                  className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-xs font-semibold"
                 >
                   {mode}
                 </span>
               ))}
             </div>
           </div>
-
-          {/* Languages */}
-          <div className="mb-6">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-              Languages
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {doctor.languages.map((lang) => (
-                <span
-                  key={lang}
-                  className="px-3 py-1.5 bg-gray-50 rounded-lg text-xs font-medium text-gray-600"
-                >
-                  {lang}
-                </span>
-              ))}
-            </div>
-          </div>
         </div>
-      </div>
+      </aside>
 
-      {/* Main Content */}
+      {/* Main content: doctor details and booking calendar */}
       <div className="flex-1 h-screen overflow-y-auto">
-        {/* Header with Back Link */}
-        <div className="relative overflow-hidden bg-transparent">
-          <div className="relative px-6 lg:px-10 pt-8 pb-6">
-            {/* Back Link */}
-            <Link
-              to="/doctors"
-              className="inline-flex items-center gap-2 text-sm font-medium text-emerald-600 hover:text-emerald-700 transition-colors mb-6"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-              Back to Doctors
-            </Link>
-
-            <div className="text-center max-w-3xl mx-auto">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-800 mb-3">
-                Book Your <span className="text-emerald-600">Appointment</span>
-              </h2>
-              <p className="text-gray-500 text-lg">
-                Select a convenient date and time slot for your consultation
-              </p>
-            </div>
-          </div>
+        {/* Navigation and page title */}
+        <div className="px-6 lg:px-10 pt-8 pb-4">
+          <Link
+            to="/doctors"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to Doctors
+          </Link>
         </div>
 
-        <div className="px-6 lg:px-10 pb-8">
-          <div className="max-w-5xl mx-auto">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left - About & Details */}
-              <div className="space-y-5">
-                {/* About */}
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
-                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <svg
-                      className="w-5 h-5 text-emerald-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-                      />
-                    </svg>
-                    Professional Overview
-                  </h3>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    {doctor.about}
-                  </p>
-                </div>
+        {/* Page header */}
+        <div className="text-center px-6 mb-8">
+          <h2 className="text-3xl font-bold text-gray-800 mb-1">
+            Book Your <span className="text-emerald-600">Appointment</span>
+          </h2>
+          <p className="text-gray-400 text-sm">
+            Review the doctor's profile and choose a convenient time
+          </p>
+        </div>
 
-                {/* Qualifications */}
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
-                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <svg
-                      className="w-5 h-5 text-emerald-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342"
-                      />
-                    </svg>
-                    Qualifications
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {doctor.qualifications.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-lg border border-emerald-100 bg-emerald-50/50 px-3 py-1.5 text-sm font-medium text-emerald-700"
-                      >
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+        {/* Content grid: left side (info cards) and right side (calendar + booking) */}
+        <div className="px-6 lg:px-10 pb-10">
+          <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Professional info, services, and inclusions */}
+            <div className="space-y-5">
+              {/* Professional overview card */}
+              <InfoCard
+                icon={<Stethoscope className="w-5 h-5" />}
+                title="Professional Overview"
+              >
+                <p className="text-sm text-gray-600 leading-relaxed">{bio}</p>
+              </InfoCard>
 
-                {/* Services */}
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
-                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <svg
-                      className="w-5 h-5 text-emerald-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
+              {/* Services */}
+              <InfoCard
+                icon={<ClipboardList className="w-5 h-5" />}
+                title="Services Offered"
+              >
+                <ul className="space-y-2">
+                  {(DEFAULTS.services.length
+                    ? DEFAULTS.services
+                    : [
+                        "General Consultation",
+                        "Follow-up Visit",
+                        "Prescription & Referral",
+                        "Medical Certificate",
+                      ]
+                  ).map((s) => (
+                    <li
+                      key={s}
+                      className="flex items-center gap-2 text-sm text-gray-600"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"
-                      />
-                    </svg>
-                    Services Offered
-                  </h3>
-                  <ul className="space-y-2">
-                    {doctor.services.map((service) => (
-                      <li
-                        key={service}
-                        className="flex items-center gap-2 text-sm text-gray-600"
-                      >
-                        <svg
-                          className="w-4 h-4 text-emerald-500 shrink-0"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        {service}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </InfoCard>
 
-                {/* Conditions Treated */}
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
-                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <svg
-                      className="w-5 h-5 text-emerald-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
+              {/* Fee includes */}
+              <InfoCard
+                icon={<ShieldCheck className="w-5 h-5" />}
+                title="Consultation Includes"
+              >
+                <div className="flex flex-wrap gap-2">
+                  {DEFAULTS.feeIncludes.map((item) => (
+                    <span
+                      key={item}
+                      className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"
-                      />
-                    </svg>
-                    Conditions Treated
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {doctor.conditionsTreated.map((condition) => (
-                      <span
-                        key={condition}
-                        className="rounded-full bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-100"
-                      >
-                        {condition}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Fee Includes */}
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
-                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <svg
-                      className="w-5 h-5 text-emerald-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z"
-                      />
-                    </svg>
-                    Consultation Includes
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {doctor.feeIncludes.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-full border border-emerald-100 bg-emerald-50/50 px-3 py-1.5 text-xs font-medium text-emerald-700"
-                      >
-                        ✓ {item}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Right - Calendar & Booking */}
-              <div className="space-y-5">
-                {/* Calendar Card */}
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-gray-800">
-                      Availability Calendar
-                    </h3>
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                      {dynamicAvailabilityScore}% slots open
+                      ✓ {item}
                     </span>
-                  </div>
-
-                  <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 flex items-center gap-3">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                    <div>
-                      <p className="text-xs text-gray-500">Next Available</p>
-                      <p className="text-sm font-medium text-gray-800">
-                        {doctor.nextAvailable}
-                      </p>
-                    </div>
-                  </div>
-
-                  <MiniCalendar
-                    scheduleDays={scheduleDays}
-                    availableDates={doctor.availableDates}
-                    bookedDates={doctor.bookedDates}
-                    interactive={false}
-                  />
+                  ))}
                 </div>
+              </InfoCard>
+            </div>
 
-                {/* Booking Summary */}
-                <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
-                  <h3 className="font-semibold text-gray-800 mb-4">
-                    Booking Summary
-                  </h3>
-
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500">Booking Mode</span>
-                      <span className="font-medium text-gray-800">
-                        Date and time on next page
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500">Response</span>
-                      <span className="font-medium text-gray-800">
-                        {doctor.responseTime}
-                      </span>
-                    </div>
-                    <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
-                      <span className="text-gray-500">Consultation Fee</span>
-                      <span className="text-lg font-bold text-emerald-600">
-                        Rs{doctor.consultationFee}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
+            {/* Right: Interactive calendar and booking summary */}
+            <div className="space-y-5">
+              {/* Calendar widget for date selection */}
+              <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                {/* Calendar navigation and month display */}
+                <div className="bg-emerald-600 px-6 py-4 flex items-center justify-between">
                   <button
-                    type="button"
-                    onClick={handleBookAppointment}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 text-sm font-semibold text-white shadow-md shadow-emerald-100 transition-all hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-200"
+                    onClick={() =>
+                      setCalMonth(
+                        (d) => new Date(d.getFullYear(), d.getMonth() - 1, 1),
+                      )
+                    }
+                    className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition-all"
                   >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                      />
-                    </svg>
-                    Book Now
+                    <ChevronLeft className="w-4 h-4 text-white" />
+                  </button>
+                  <div className="text-center">
+                    <p className="text-white font-bold text-base">
+                      {monthLabel}
+                    </p>
+                    <p className="text-emerald-200 text-xs mt-0.5">
+                      {scheduledDows.size > 0
+                        ? `Available: ${Array.from(scheduledDows)
+                            .map((d) => DOW_LABELS[d])
+                            .join(", ")}`
+                        : "No schedule set"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() =>
+                      setCalMonth(
+                        (d) => new Date(d.getFullYear(), d.getMonth() + 1, 1),
+                      )
+                    }
+                    className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition-all"
+                  >
+                    <ChevronRight className="w-4 h-4 text-white" />
                   </button>
                 </div>
+
+                {/* Day-of-week labels row */}
+                <div className="grid grid-cols-7 bg-emerald-50 border-b border-emerald-100">
+                  {DOW_LABELS.map((d) => (
+                    <div
+                      key={d}
+                      className="py-2.5 text-center text-[10px] font-bold text-emerald-600 uppercase tracking-wider"
+                    >
+                      {d}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Calendar grid: week rows and day cells */}
+                <div className="p-4">
+                  {calDays.map((week, wi) => (
+                    <div key={wi} className="grid grid-cols-7 gap-1 mb-1">
+                      {/* Render each day cell with appropriate styling based on state */}
+                      {week.map((cell, ci) => {
+                        if (!cell.cur) {
+                          // Outside current month — very faint
+                          return (
+                            <div
+                              key={ci}
+                              className="h-10 flex items-center justify-center"
+                            >
+                              <span className="text-xs text-gray-200">
+                                {cell.day}
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        const isToday =
+                          cell.date &&
+                          cell.date.toDateString() ===
+                            new Date().toDateString();
+
+                        if (cell.state === "available") {
+                          return (
+                            <div
+                              key={ci}
+                              className="relative h-10 flex items-center justify-center rounded-xl bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-default"
+                              title="Available"
+                            >
+                              <span
+                                className={cx(
+                                  "text-sm font-bold text-emerald-700",
+                                  isToday && "underline",
+                                )}
+                              >
+                                {cell.day}
+                              </span>
+                              <span className="absolute bottom-1 w-1 h-1 rounded-full bg-emerald-500" />
+                            </div>
+                          );
+                        }
+
+                        if (cell.state === "past") {
+                          return (
+                            <div
+                              key={ci}
+                              className="h-10 flex items-center justify-center rounded-xl"
+                            >
+                              <span className="text-xs text-gray-300">
+                                {cell.day}
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        // state === "none" — no schedule this day
+                        return (
+                          <div
+                            key={ci}
+                            className="h-10 flex items-center justify-center rounded-xl"
+                          >
+                            <span
+                              className={cx(
+                                "text-sm text-gray-400",
+                                isToday && "font-bold text-gray-600",
+                              )}
+                            >
+                              {cell.day}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Calendar legend */}
+                <div className="px-5 pb-4 flex items-center gap-5 border-t border-gray-50 pt-3">
+                  <LegendItem
+                    color="bg-emerald-200 border border-emerald-300"
+                    label="Available"
+                  />
+                  <LegendItem color="bg-gray-100" label="No schedule" />
+                  <LegendItem
+                    color="bg-gray-50 border border-dashed border-gray-200"
+                    label="Past"
+                  />
+                </div>
               </div>
+
+              {/* Appointment summary with cost breakdown */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                <h3 className="font-bold text-gray-800 mb-4 text-sm">
+                  Booking Summary
+                </h3>
+                <div className="space-y-3 text-sm">
+                  <SummaryRow label="Doctor" value={displayName} />
+                  <SummaryRow label="Specialty" value={specialty} />
+                  <SummaryRow label="Hospital" value={hospitalName} />
+                  <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
+                    <span className="text-gray-500 font-medium">
+                      Consultation Fee
+                    </span>
+                    <span className="text-xl font-black text-emerald-600">
+                      Rs {fee.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Proceed to booking wizard */}
+              <button
+                onClick={handleBookNow}
+                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base transition-all shadow-lg shadow-emerald-100 hover:shadow-emerald-200 active:scale-95"
+              >
+                <Calendar className="w-5 h-5" />
+                Book Appointment Now
+              </button>
             </div>
           </div>
         </div>
@@ -662,4 +700,37 @@ function DoctorProfile() {
   );
 }
 
-export default DoctorProfile;
+// Reusable info card component for displaying doctor details
+function InfoCard({ icon, title, children }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all">
+      <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+        <span className="text-emerald-500">{icon}</span>
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+// Booking summary row: label and value pair
+function SummaryRow({ label, value }) {
+  return (
+    <div className="flex justify-between items-start gap-4">
+      <span className="text-gray-400 shrink-0">{label}</span>
+      <span className="font-semibold text-gray-700 text-right">
+        {value || "—"}
+      </span>
+    </div>
+  );
+}
+
+// Calendar legend item: color swatch and label
+function LegendItem({ color, label }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className={cx("w-4 h-4 rounded-md", color)} />
+      <span className="text-[10px] text-gray-400 font-medium">{label}</span>
+    </div>
+  );
+}

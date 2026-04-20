@@ -1,35 +1,44 @@
+-- Database schema for doctor appointment booking system
 -- Run these 2 lines in psql to create and switch to the target database.
 CREATE DATABASE doctor_appointment_system;
 \c doctor_appointment_system
 
+-- Enable case-insensitive text comparisons for emails and other fields
 CREATE EXTENSION IF NOT EXISTS citext;
+-- Generate secure random UUIDs
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Create custom enum types for role-based access control and appointment state management
 DO $$
 BEGIN
+    -- User roles: patients, healthcare providers, and system admins
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
         CREATE TYPE user_role AS ENUM ('user', 'doctor', 'admin');
     END IF;
 
+    -- Appointment lifecycle: from booking through completion or cancellation
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'appointment_status') THEN
         CREATE TYPE appointment_status AS ENUM (
-            'pending',
-            'confirmed',
-            'cancelled',
-            'completed',
-            'rescheduled',
-            'no_show'
+            'pending',      -- Initial state, awaiting confirmation
+            'confirmed',    -- Approved by doctor or system
+            'cancelled',    -- User or doctor cancelled
+            'completed',    -- Appointment occurred
+            'rescheduled',  -- Moved to different time
+            'no_show'       -- Patient didn't arrive
         );  
     END IF;
-
+-- Payment states for consultation fees
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_status') THEN
         CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded');
     END IF;
+
+    -- Doctor credentialing: verify licenses and credentials before allowing appointments    END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'doctor_verification_status') THEN
         CREATE TYPE doctor_verification_status AS ENUM ('pending', 'approved', 'rejected');
     END IF;
 END
+-- Auto-update timestamp whenever a record is modified
 $$;
 
 CREATE OR REPLACE FUNCTION set_updated_at()
@@ -37,9 +46,7 @@ RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
+-- Medical specializations (Cardiology, ENT, etc.)
 CREATE TABLE IF NOT EXISTS specializations (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(120) NOT NULL UNIQUE,
@@ -47,10 +54,17 @@ CREATE TABLE IF NOT EXISTS specializations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Core user accounts — doctors, patients, and admins
+-- Uses case-insensitive email field for convenient lookups    description TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     email CITEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+-- User demographic and contact info — separate from authentication
+-- One-to-one with users table for easy profile lookup
     role user_role NOT NULL DEFAULT 'user',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -72,6 +86,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     country VARCHAR(100),
     postal_code VARCHAR(20),
     blood_group VARCHAR(5),
+-- Healthcare facilities where doctors practice
+-- Unique constraint prevents duplicate hospital entries
     emergency_contact_name VARCHAR(120),
     emergency_contact_phone VARCHAR(30),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -85,6 +101,8 @@ CREATE TABLE IF NOT EXISTS hospitals (
     address_line2 VARCHAR(200),
     city VARCHAR(100) NOT NULL,
     state VARCHAR(100),
+-- Doctor-specific data: credentials, fees, ratings
+-- License number uniquely identifies medical professionals
     country VARCHAR(100) NOT NULL,
     postal_code VARCHAR(20),
     phone VARCHAR(30),
@@ -97,12 +115,17 @@ CREATE TABLE IF NOT EXISTS doctors (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     specialization_id BIGINT REFERENCES specializations(id) ON DELETE SET NULL,
+-- Doctor-hospital affiliations: many doctors work across multiple facilities
+-- Primary flag indicates the doctor's main practice location
     license_number VARCHAR(100) NOT NULL UNIQUE,
     years_of_experience SMALLINT NOT NULL DEFAULT 0 CHECK (years_of_experience >= 0),
     consultation_fee NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (consultation_fee >= 0),
     bio TEXT,
     average_rating NUMERIC(3, 2) NOT NULL DEFAULT 0 CHECK (average_rating >= 0 AND average_rating <= 5),
     total_reviews INTEGER NOT NULL DEFAULT 0 CHECK (total_reviews >= 0),
+-- Patient medical background: conditions, meds, allergies
+-- Patient can control doctor visibility for privacy
+-- One-to-one with users table
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -114,6 +137,9 @@ CREATE TABLE IF NOT EXISTS doctor_hospitals (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (doctor_id, hospital_id)
 );
+-- Doctor availability templates: repeating weekly schedules
+-- day_of_week: 0=Sunday through 6=Saturday
+-- Defines time range and slot duration for appointment booking
 
 CREATE TABLE IF NOT EXISTS medical_history (
     id BIGSERIAL PRIMARY KEY,
@@ -127,6 +153,9 @@ CREATE TABLE IF NOT EXISTS medical_history (
     is_visible_to_doctors BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- Booked appointments: actual consultation reservations
+-- UUID code for sharing appointments outside the system (emails, SMS)
+-- Tracks cancellation info: who cancelled and when
 );
 
 CREATE TABLE IF NOT EXISTS doctor_schedules (
@@ -144,6 +173,8 @@ CREATE TABLE IF NOT EXISTS doctor_schedules (
     CHECK (end_time > start_time),
     UNIQUE (doctor_id, hospital_id, day_of_week, start_time, end_time)
 );
+-- Audit trail: tracks every appointment reschedule event
+-- Preserves old and new times for conflict detection and reporting
 
 CREATE TABLE IF NOT EXISTS appointments (
     id BIGSERIAL PRIMARY KEY,
@@ -157,6 +188,8 @@ CREATE TABLE IF NOT EXISTS appointments (
     end_time TIME NOT NULL,
     status appointment_status NOT NULL DEFAULT 'pending',
     reason TEXT,
+-- Payment records: one-to-one with appointments
+-- Provider fields link to external payment gateways (Stripe, PayPal, etc.)
     notes TEXT,
     cancelled_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
     cancelled_at TIMESTAMPTZ,
@@ -169,6 +202,8 @@ CREATE TABLE IF NOT EXISTS appointment_reschedules (
     id BIGSERIAL PRIMARY KEY,
     appointment_id BIGINT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
     old_appointment_date DATE NOT NULL,
+-- Doctor reviews and ratings: collected after appointments
+-- Public feedback to build doctor credibility and patient trust
     old_start_time TIME NOT NULL,
     old_end_time TIME NOT NULL,
     new_appointment_date DATE NOT NULL,
