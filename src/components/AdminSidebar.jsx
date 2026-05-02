@@ -1,68 +1,45 @@
 import React, { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Users,
   CalendarDays,
   Settings,
+  UserCircle,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
 } from "lucide-react";
 import logoImg from "../assets/logoimage.png";
-
-const API_BASE_URL = "http://localhost:3000/api";
+import { clearAdminSession } from "../utils/adminAuth";
 
 const NAV_ITEMS = [
-  { label: "Dashboard", Icon: LayoutDashboard, to: "/doctor/dashboard" },
-  { label: "Patients", Icon: Users, to: "/doctor/patients" },
-  { label: "Appointments", Icon: CalendarDays, to: "/doctor/appointments" },
-  { label: "Schedule Setup", Icon: Settings, to: "/doctor/schedule" },
+  { label: "Dashboard", Icon: LayoutDashboard, to: "/admin/dashboard" },
+  { label: "Users", Icon: Users, to: "/admin/users" },
+  { label: "Appointments", Icon: CalendarDays, to: "/admin/appointments" },
+//   { label: "Settings", Icon: Settings, to: "/admin/settings" },
+  { label: "Profile", Icon: UserCircle, to: "/admin/profile" },
 ];
 
-function DoctorSidebar() {
+function AdminSidebar() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const currentPath = location.pathname;
   const [open, setOpen] = useState(true);
-  const [doctorData, setDoctorData] = useState(null);
-
-  const doctorId =
-    localStorage.getItem("doctorId") || sessionStorage.getItem("doctorId");
 
   useEffect(() => {
-    if (!doctorId) return;
-
-    let isMounted = true;
-
-    const fetchDoctor = async () => {
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/doctors/${doctorId}/panel`,
-        );
-        if (!response.ok) return;
-        const payload = await response.json();
-        if (isMounted) {
-          setDoctorData(payload.data?.doctor || null);
-        }
-      } catch {
-        if (isMounted) setDoctorData(null);
+    const handleResize = () => {
+      if (window.innerWidth < 1024) {
+        setOpen(false);
       }
     };
 
-    fetchDoctor();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [doctorId]);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("doctorId");
-    sessionStorage.removeItem("doctorId");
-    localStorage.removeItem("userID");
-    sessionStorage.removeItem("userID");
-    navigate("/doctor/login");
+    clearAdminSession();
+    window.location.assign("/admin/login");
   };
 
   return (
@@ -98,7 +75,8 @@ function DoctorSidebar() {
 
       <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
         {NAV_ITEMS.map(({ label, Icon, to }) => {
-          const active = currentPath === to;
+          const active = location.pathname === to;
+
           return (
             <Link
               key={to}
@@ -137,50 +115,38 @@ function DoctorSidebar() {
       </nav>
 
       {open ? (
-        <div className="px-3 pb-4 shrink-0 space-y-3">
-          <Link
-            to="/doctor/profile"
-            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 hover:bg-gray-100 transition"
-          >
-            <img
-              src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=200&h=200&fit=crop&crop=face"
-              alt="doctor"
-              className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100 shrink-0"
-            />
+        <div className="px-3 pb-4 shrink-0">
+          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
+            <div className="w-9 h-9 rounded-xl bg-[#1b6a55] flex items-center justify-center text-white font-extrabold text-sm">
+              SA
+            </div>
             <div className="min-w-0">
               <p className="text-xs font-bold text-gray-800 truncate">
-                {doctorData?.first_name && doctorData?.last_name
-                  ? `Dr. ${doctorData.first_name} ${doctorData.last_name}`
-                  : "Doctor"}
+                Super Admin
               </p>
               <p className="text-[10px] text-emerald-600 font-medium">
-                {doctorData?.specialization_name || "Specialist"}
+                Administrator
               </p>
             </div>
-          </Link>
+          </div>
+
           <button
-            type="button"
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-100 transition"
+            className="mt-3 w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition"
           >
             <LogOut className="w-4 h-4" />
-            Logout
+            <span className="text-sm font-semibold">Logout</span>
           </button>
         </div>
       ) : (
         <div className="px-2 pb-4 shrink-0 flex flex-col items-center gap-2">
-          <Link to="/doctor/profile" title="Open profile">
-            <img
-              src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=200&h=200&fit=crop&crop=face"
-              alt="doctor"
-              className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100"
-            />
-          </Link>
+          <div className="w-8 h-8 rounded-xl bg-[#1b6a55] flex items-center justify-center text-white font-extrabold text-xs">
+            SA
+          </div>
           <button
-            type="button"
             onClick={handleLogout}
             title="Logout"
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-red-500 hover:bg-red-50 transition"
+            className="w-8 h-8 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition flex items-center justify-center"
           >
             <LogOut className="w-4 h-4" />
           </button>
@@ -190,4 +156,4 @@ function DoctorSidebar() {
   );
 }
 
-export default DoctorSidebar;
+export default AdminSidebar;

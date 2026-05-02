@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Users,
@@ -6,14 +7,53 @@ import {
   Settings,
   User,
   ShieldPlus,
+  LogOut,
 } from "lucide-react";
+import { clearAdminSession } from "../utils/adminAuth";
 
-const Sidebar = ({ activeTab, setActiveTab }) => {
-  const mainLinks = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "users", label: "Users", icon: Users, badge: 12 },
-    { id: "appointments", label: "Appointments", icon: Calendar },
-  ];
+const Sidebar = ({ activeTab, setActiveTab, isAdmin = false }) => {
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    clearAdminSession();
+    navigate("/admin/login", { replace: true });
+  };
+
+  const handleNavigation = (path) => {
+    if (isAdmin) {
+      navigate(path);
+    } else {
+      setActiveTab(path);
+    }
+  };
+
+  const mainLinks = isAdmin
+    ? [
+        {
+          id: "dashboard",
+          label: "Dashboard",
+          icon: LayoutDashboard,
+          path: "/admin/dashboard",
+        },
+        {
+          id: "users",
+          label: "Users",
+          icon: Users,
+          badge: 12,
+          path: "/admin/users",
+        },
+        {
+          id: "appointments",
+          label: "Appointments",
+          icon: Calendar,
+          path: "/admin/appointments",
+        },
+      ]
+    : [
+        { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { id: "users", label: "Users", icon: Users, badge: 12 },
+        { id: "appointments", label: "Appointments", icon: Calendar },
+      ];
 
   const systemLinks = [
     { id: "settings", label: "Settings", icon: Settings },
@@ -21,7 +61,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
   ];
 
   return (
-    <div className="w-64 bg-brand-dark text-gray-300 flex flex-col h-screen fixed top-0 left-0">
+    <div className="w-64  bg-black border-r border-gray-100   text-black   flex flex-col h-screen fixed top-0 left-0">
       {/* Logo Area */}
       <div className="p-6 flex items-center justify-start">
         <img
@@ -48,11 +88,11 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
               return (
                 <button
                   key={link.id}
-                  onClick={() => setActiveTab(link.id)}
+                  onClick={() => handleNavigation(link.path || link.id)}
                   className={`flex items-center justify-between w-full px-3 py-2.5 rounded-lg transition-colors ${
                     isActive
                       ? "bg-brand-teal text-white"
-                      : "hover:bg-white/5 text-gray-300 hover:text-white"
+                      : "hover:bg-white/5 text-gray-600 hover:text-white"
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -83,11 +123,11 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
               return (
                 <button
                   key={link.id}
-                  onClick={() => setActiveTab(link.id)}
+                  onClick={() => handleNavigation(link.id)}
                   className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition-colors ${
                     isActive
                       ? "bg-brand-teal text-white"
-                      : "hover:bg-white/5 text-gray-300 hover:text-white"
+                      : "hover:bg-white/5 text-gray-600 hover:text-white"
                   }`}
                 >
                   <link.icon
@@ -102,7 +142,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       </div>
 
       {/* User Profile Footer */}
-      <div className="p-4 border-t border-white/10">
+      <div className="p-4 border-t border-white/10 space-y-3">
         <div
           onClick={() => setActiveTab("profile")}
           className="flex items-center gap-3 hover:bg-white/5 p-2 rounded-lg cursor-pointer transition-colors"
@@ -116,6 +156,15 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
           </div>
           <span className="text-gray-400">›</span>
         </div>
+
+        {/* Logout Button */}
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+        >
+          <LogOut className="w-5 h-5" />
+          <span className="font-medium text-sm">Logout</span>
+        </button>
       </div>
     </div>
   );
