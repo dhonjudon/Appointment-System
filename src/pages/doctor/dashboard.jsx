@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useDebugValue } from "react";
+import DoctorSidebar from "../../components/DoctorSidebar";
 import {
   LayoutDashboard,
   Users,
@@ -6,6 +7,7 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  UserRound,
   Search,
   Star,
   ChevronLeft,
@@ -15,6 +17,7 @@ import {
   AlertCircle,
   Loader,
 } from "lucide-react";
+import { NotificationBell } from "../../components/NotificationBell";
 import logoImg from "../../assets/logoimage.png";
 
 // ── API BASE URL ──────────────────────────────────────────────────────────────
@@ -30,11 +33,21 @@ function getWeekDays() {
   });
 }
 
+function toLocalDateKey(dateValue) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 const NAV_ITEMS = [
-  { label: "Dashboard", Icon: LayoutDashboard, to: "/" },
-  { label: "Patients", Icon: Users, to: "/docotr/patients" },
+  { label: "Dashboard", Icon: LayoutDashboard, to: "/doctor/dashboard" },
+  { label: "Patients", Icon: Users, to: "/doctor/patients" },
   { label: "Appointments", Icon: CalendarDays, to: "/doctor/appointments" },
   { label: "Schedule Setup", Icon: Settings, to: "/doctor/schedule" },
+  { label: "Profile", Icon: UserRound, to: "/doctor/profile" },
 ];
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -113,7 +126,10 @@ function Sidebar({ open, setOpen, activePath, doctorData }) {
       {/* Doctor info */}
       {open ? (
         <div className="px-3 pb-4 shrink-0">
-          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
+          <Link
+            to="/doctor/profile"
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 hover:bg-gray-100 transition"
+          >
             <img
               src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=200&h=200&fit=crop&crop=face"
               alt="doctor"
@@ -129,15 +145,17 @@ function Sidebar({ open, setOpen, activePath, doctorData }) {
                 {doctorData?.specialization_name || "Specialist"}
               </p>
             </div>
-          </div>
+          </Link>
         </div>
       ) : (
         <div className="px-2 pb-4 shrink-0 flex justify-center">
-          <img
-            src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=200&h=200&fit=crop&crop=face"
-            alt="doctor"
-            className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100"
-          />
+          <Link to="/doctor/profile" title="Open profile">
+            <img
+              src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=200&h=200&fit=crop&crop=face"
+              alt="doctor"
+              className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100"
+            />
+          </Link>
         </div>
       )}
     </aside>
@@ -154,6 +172,12 @@ export default function DoctorDashboard() {
   // API State
   const [doctorData, setDoctorData] = useState(null);
   const [patients, setPatients] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [stats, setStats] = useState({
+    totalPatients: 0,
+    todayAppointments: 0,
+    completedToday: 0,
+  });
   const [scheduleData, setScheduleData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -188,17 +212,17 @@ export default function DoctorDashboard() {
       if (!patientsRes.ok) throw new Error("Failed to fetch patients");
       const patientsData = await patientsRes.json();
 
-      // Fetch today's schedule
-      const today = new Date().toISOString().split("T")[0];
-      const scheduleRes = await fetch(
-        `${API_BASE}/doctors/${doctorId}/appointments?date=${today}`,
+      // Fetch appointments used by the weekly schedule
+      const appointmentsRes = await fetch(
+        `${API_BASE}/doctors/${doctorId}/appointments?page=1&limit=200`,
       );
-      if (!scheduleRes.ok) throw new Error("Failed to fetch schedule");
-      const scheduleDataRes = await scheduleRes.json();
+      if (!appointmentsRes.ok) throw new Error("Failed to fetch appointments");
+      const appointmentsData = await appointmentsRes.json();
 
       setDoctorData(panelData.data?.doctor);
       setPatients(patientsData.data?.items || []);
-      setScheduleData(scheduleDataRes.data);
+      setAppointments(appointmentsData.data?.items || []);
+      setScheduleData(appointmentsData.data || null);
     } catch (err) {
       console.error("Error fetching dashboard data:", err);
       setError(err.message || "Failed to load dashboard data");
@@ -206,6 +230,75 @@ export default function DoctorDashboard() {
       setLoading(false);
     }
   };
+
+  const API_BASE_URL = "http://localhost:3000/api";
+  const fetchDoctorDashboardDatas = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch doctor profile
+      const doctorRes = await fetch(`${API_BASE_URL}/doctors/${doctorId}`);
+      console.log(doctorRes);
+      const doctorData = doctorRes.ok ? await doctorRes.json() : null;
+
+      if (doctorData?.data) {
+        setDoctorData(doctorData.data);
+      }
+
+      // Fetch doctor patients
+      const patientsRes = await fetch(
+        `${API_BASE_URL}/doctors/${doctorId}/patients?limit=100`,
+      );
+      const patientsData = patientsRes.ok
+        ? await patientsRes.json()
+        : { data: { items: [] } };
+
+      const patientsList = patientsData.data?.items || [];
+      setPatients(patientsList.slice(0, 2)); // Show first 2 patients
+
+      // Fetch doctor appointments
+      const appointmentsRes = await fetch(
+        `${API_BASE_URL}/doctors/${doctorId}/appointments`,
+      );
+      const appointmentsData = appointmentsRes.ok
+        ? await appointmentsRes.json()
+        : { data: { items: [] } };
+
+      const appointmentsList = appointmentsData.data?.items || [];
+      setAppointments(appointmentsList);
+      setScheduleData(appointmentsData.data || null);
+
+      // Calculate stats
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const todayAppts = appointmentsList.filter((apt) => {
+        const aptDate = new Date(apt.appointment_date);
+        aptDate.setHours(0, 0, 0, 0);
+        return aptDate.getTime() === today.getTime();
+      }).length;
+
+      const completedAppts = appointmentsList.filter(
+        (apt) => apt.status === "completed",
+      ).length;
+
+      setStats({
+        totalPatients: patientsList.length,
+        todayAppointments: todayAppts,
+        completedToday: completedAppts,
+      });
+    } catch (err) {
+      console.error("Error fetching doctor dashboard data:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDoctorDashboardDatas();
+  }, []);
 
   function getWeekDays() {
     const today = new Date();
@@ -225,9 +318,9 @@ export default function DoctorDashboard() {
     });
 
     return weekDays.map((day) => {
-      const dateStr = day.toISOString().split("T")[0];
+      const dateStr = toLocalDateKey(day);
       // Filter appointments for this day
-      const dayAppts = (scheduleData?.items || []).filter(
+      const dayAppts = (appointments || []).filter(
         (appt) => appt.appointment_date === dateStr,
       );
       return dayAppts.map((appt) => ({
@@ -316,12 +409,7 @@ export default function DoctorDashboard() {
         rel="stylesheet"
       />
 
-      <Sidebar
-        open={sidebarOpen}
-        setOpen={setSidebarOpen}
-        activePath="/"
-        doctorData={doctorData}
-      />
+      <DoctorSidebar />
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -342,10 +430,7 @@ export default function DoctorDashboard() {
               {dayNames[today.getDay()]}, {monthNames[today.getMonth()]}{" "}
               {today.getDate()}
             </span>
-            <button className="relative w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-100 transition text-gray-500">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            </button>
+            <NotificationBell />
           </div>
         </header>
 
@@ -385,7 +470,7 @@ export default function DoctorDashboard() {
 
             {/* This week's schedule */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex-1 overflow-y-auto">
-              <div className="flex flex-col justify-center justify-between mb-4">
+              <div className="flex flex-col mb-4">
                 <div className="flex justify-between w-full items-center  gap-3">
                   <h3 className="text-xl font-extrabold text-gray-800">
                     This Week's Schedule
