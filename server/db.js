@@ -83,6 +83,28 @@ const normalizeNumericId = (value) => {
   return numericValue;
 };
 
+const roundCurrency = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+const getPaymentQuote = (baseAmount, paymentMethod = "card") => {
+  const normalizedMethod = ["card", "upi", "cash"].includes(paymentMethod)
+    ? paymentMethod
+    : "card";
+
+  const base = roundCurrency(baseAmount);
+  const platformFeeRate = normalizedMethod === "card" ? 0.025 : normalizedMethod === "upi" ? 0.01 : 0;
+  const platformFee = roundCurrency(base * platformFeeRate);
+  const tax = roundCurrency((base + platformFee) * 0.05);
+  const total = roundCurrency(base + platformFee + tax);
+
+  return {
+    payment_method: normalizedMethod,
+    base_amount: base,
+    platform_fee: platformFee,
+    tax,
+    total_amount: total,
+  };
+};
+
 const authService = {
   registerUser: async ({ email, password, role = "user" }) => {
     const allowedRoles = ["user", "doctor", "admin"];
@@ -564,7 +586,7 @@ const appointmentService = {
 						status,
 						reason
 					)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
 					RETURNING *
 				`,
         [
@@ -890,56 +912,155 @@ const paymentService = {
   createPayment: async ({
     appointment_id,
     user_id,
-    amount,
     currency,
     provider,
+    payment_method,
     provider_payment_id,
+    metadata,
   }) => {
-    const result = await pool.query(
-      `
-				INSERT INTO payments (
-					appointment_id,
-					user_id,
-					amount,
-					currency,
-					provider,
-					provider_payment_id,
-					status
-				)
-				VALUES ($1, $2, $3, COALESCE($4, 'USD'), $5, $6, 'pending')
-				RETURNING *
-			`,
-      [
-        appointment_id,
-        user_id,
-        amount,
-        currency || "USD",
-        provider,
-        provider_payment_id || null,
-      ],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    return result.rows[0];
+      const appointmentResult = await client.query(
+        `
+          SELECT a.*, d.consultation_fee
+          FROM appointments a
+          JOIN doctors d ON d.id = a.doctor_id
+          WHERE a.id = $1 AND a.user_id = $2
+          FOR UPDATE
+        `,
+        [appointment_id, user_id],
+      );
+
+      if (!appointmentResult.rowCount) {
+        throw new Error("Appointment not found for this user");
+      }
+
+      const appointment = appointmentResult.rows[0];
+      if (!["pending", "rescheduled", "confirmed"].includes(appointment.status)) {
+        throw new Error("Payment is allowed only for active appointments");
+      }
+
+      const quote = getPaymentQuote(
+        Number(appointment.consultation_fee),
+        payment_method || provider,
+      );
+
+      const paymentResult = await client.query(
+        `
+          INSERT INTO payments (
+            appointment_id,
+            user_id,
+            amount,
+            currency,
+            provider,
+            payment_method,
+            provider_payment_id,
+            amount_breakdown,
+            metadata,
+            status
+          )
+          VALUES (
+            $1, $2, $3, COALESCE($4, 'USD'), $5, $6, $7, $8::jsonb, $9::jsonb, 'pending'
+          )
+          ON CONFLICT (appointment_id)
+          DO UPDATE SET
+            amount = EXCLUDED.amount,
+            currency = EXCLUDED.currency,
+            provider = EXCLUDED.provider,
+            payment_method = EXCLUDED.payment_method,
+            provider_payment_id = EXCLUDED.provider_payment_id,
+            amount_breakdown = EXCLUDED.amount_breakdown,
+            metadata = EXCLUDED.metadata,
+            status = 'pending',
+            paid_at = NULL
+          RETURNING *
+        `,
+        [
+          appointment_id,
+          user_id,
+          quote.total_amount,
+          currency || "USD",
+          provider,
+          quote.payment_method,
+          provider_payment_id || null,
+          JSON.stringify(quote),
+          JSON.stringify(metadata || {}),
+        ],
+      );
+
+      await client.query("COMMIT");
+      return {
+        ...paymentResult.rows[0],
+        quote,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 
-  verifyPayment: async ({ paymentId, status }) => {
+  verifyPayment: async ({ paymentId, user_id, status, provider_payment_id }) => {
     const allowed = ["paid", "failed", "refunded"];
     if (!allowed.includes(status)) {
       throw new Error("Invalid payment verification status");
     }
 
-    const result = await pool.query(
-      `
-				UPDATE payments
-				SET status = $2,
-						paid_at = CASE WHEN $2 = 'paid' THEN NOW() ELSE paid_at END
-				WHERE id = $1
-				RETURNING *
-			`,
-      [paymentId, status],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    return result.rows[0] || null;
+      const paymentResult = await client.query(
+        `
+          UPDATE payments
+          SET
+            status = $2,
+            provider_payment_id = COALESCE($3, provider_payment_id),
+            paid_at = CASE WHEN $2 = 'paid' THEN NOW() ELSE paid_at END
+          WHERE id = $1
+            AND user_id = $4
+          RETURNING *
+        `,
+        [paymentId, status, provider_payment_id || null, user_id],
+      );
+
+      if (!paymentResult.rowCount) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+
+      const payment = paymentResult.rows[0];
+      if (status === "paid") {
+        await client.query(
+          `
+            UPDATE appointments
+            SET status = 'confirmed'
+            WHERE id = $1 AND user_id = $2
+          `,
+          [payment.appointment_id, user_id],
+        );
+      } else if (status === "failed") {
+        await client.query(
+          `
+            UPDATE appointments
+            SET status = 'cancelled', cancelled_by = $2, cancelled_at = NOW()
+            WHERE id = $1 AND user_id = $2 AND status = 'pending'
+          `,
+          [payment.appointment_id, user_id],
+        );
+      }
+
+      await client.query("COMMIT");
+      return payment;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 };
 
@@ -1405,23 +1526,22 @@ const paymentController = {
     const payload = {
       appointment_id: normalizeNumericId(req.body.appointment_id),
       user_id: normalizeNumericId(req.body.user_id),
-      amount: Number(req.body.amount),
       currency: req.body.currency,
       provider: req.body.provider,
+      payment_method: req.body.payment_method,
       provider_payment_id: req.body.provider_payment_id,
+      metadata: req.body.metadata,
     };
 
     if (
       !payload.appointment_id ||
       !payload.user_id ||
-      !payload.provider ||
-      !Number.isFinite(payload.amount) ||
-      payload.amount <= 0
+      !payload.provider
     ) {
       return sendError(
         res,
         400,
-        "appointment_id, user_id, provider and valid amount are required",
+        "appointment_id, user_id and provider are required",
       );
     }
 
@@ -1431,15 +1551,45 @@ const paymentController = {
 
   verifyPayment: asyncHandler(async (req, res) => {
     const paymentId = normalizeNumericId(req.params.paymentId);
-    const { status } = req.body;
+    const userId = normalizeNumericId(req.body.user_id);
+    const { status, provider_payment_id } = req.body;
 
-    if (!paymentId || !status) {
-      return sendError(res, 400, "Valid paymentId and status are required");
+    if (!paymentId || !userId || !status) {
+      return sendError(
+        res,
+        400,
+        "Valid paymentId, user_id and status are required",
+      );
     }
 
-    const payment = await paymentService.verifyPayment({ paymentId, status });
+    const payment = await paymentService.verifyPayment({
+      paymentId,
+      user_id: userId,
+      status,
+      provider_payment_id,
+    });
     if (!payment) {
       return sendError(res, 404, "Payment not found");
+    }
+
+    if (status === "paid") {
+      await createNotification(
+        userId,
+        "Payment Successful",
+        "Payment received and your appointment is confirmed.",
+        "payment",
+        { payment_id: payment.id, appointment_id: payment.appointment_id },
+      );
+    }
+
+    if (status === "failed") {
+      await createNotification(
+        userId,
+        "Payment Failed",
+        "Payment failed and the pending appointment was cancelled.",
+        "payment",
+        { payment_id: payment.id, appointment_id: payment.appointment_id },
+      );
     }
 
     sendSuccess(res, 200, "Payment verified successfully", payment);
