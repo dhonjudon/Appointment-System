@@ -6,7 +6,7 @@ const StarRating = ({
   readOnly = false,
   size = "w-5 h-5",
 }) => {
-  return (
+  return (+
     <div className="flex space-x-1">
       {[1, 2, 3, 4, 5].map((star) => (
         <button
