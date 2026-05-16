@@ -437,6 +437,248 @@ const doctorService = {
       booked_slots: bookedResult.rows,
     };
   },
+
+  // ── DOCTOR SITE: Get appointments for a specific doctor ──
+  getDoctorAppointments: async ({
+    doctorId,
+    date,
+    month,
+    year,
+    page,
+    limit,
+    offset,
+  }) => {
+    const values = [doctorId];
+    const filters = ["a.doctor_id = $1"];
+
+    // Filter by exact date
+    if (date) {
+      values.push(date);
+      filters.push(`a.appointment_date = $${values.length}`);
+    }
+    // Filter by month + year
+    if (month && year) {
+      values.push(year);
+      values.push(month);
+      filters.push(
+        `EXTRACT(YEAR FROM a.appointment_date) = $${values.length - 1}`,
+      );
+      filters.push(
+        `EXTRACT(MONTH FROM a.appointment_date) = $${values.length}`,
+      );
+    } else if (year) {
+      values.push(year);
+      filters.push(`EXTRACT(YEAR FROM a.appointment_date) = $${values.length}`);
+    }
+
+    const whereClause = `WHERE ${filters.join(" AND ")}`;
+    values.push(limit);
+    values.push(offset);
+
+    const query = `
+      SELECT
+        a.*,
+        up.first_name AS patient_first_name,
+        up.last_name  AS patient_last_name,
+        up.phone      AS patient_phone,
+        up.blood_group,
+        u.email       AS patient_email,
+        h.name        AS hospital_name
+      FROM appointments a
+      JOIN users u         ON u.id = a.user_id
+      LEFT JOIN user_profiles up ON up.user_id = a.user_id
+      LEFT JOIN hospitals h ON h.id = a.hospital_id
+      ${whereClause}
+      ORDER BY a.appointment_date ASC, a.start_time ASC
+      LIMIT $${values.length - 1} OFFSET $${values.length}`;
+
+    const countValues = values.slice(0, values.length - 2);
+    const countQuery = `SELECT COUNT(*)::int AS total FROM appointments a ${whereClause}`;
+
+    const [listResult, countResult] = await Promise.all([
+      pool.query(query, values),
+      pool.query(countQuery, countValues),
+    ]);
+    const total = countResult.rows[0]?.total || 0;
+    return {
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit) || 1,
+      items: listResult.rows,
+    };
+  },
+
+  // ── DOCTOR SITE: Get all patients (users who have/had appointments with this doctor) ──
+  getDoctorPatients: async ({ doctorId, page, limit, offset }) => {
+    const query = `
+      SELECT DISTINCT ON (u.id)
+        u.id AS user_id,
+        u.email,
+        up.first_name,
+        up.last_name,
+        up.phone,
+        up.date_of_birth,
+        up.gender,
+        up.blood_group,
+        up.address_line1,
+        up.city,
+        up.country,
+        up.emergency_contact_name,
+        up.emergency_contact_phone,
+        (SELECT COUNT(*)::int FROM appointments WHERE user_id = u.id AND doctor_id = $1) AS total_visits,
+        (SELECT MAX(appointment_date) FROM appointments WHERE user_id = u.id AND doctor_id = $1) AS last_visit_date
+      FROM appointments a
+      JOIN users u ON u.id = a.user_id
+      LEFT JOIN user_profiles up ON up.user_id = u.id
+      WHERE a.doctor_id = $1
+      ORDER BY u.id ASC
+      LIMIT $2 OFFSET $3`;
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT user_id)::int AS total FROM appointments WHERE doctor_id = $1`;
+
+    const [listResult, countResult] = await Promise.all([
+      pool.query(query, [doctorId, limit, offset]),
+      pool.query(countQuery, [doctorId]),
+    ]);
+    const total = countResult.rows[0]?.total || 0;
+    return {
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit) || 1,
+      items: listResult.rows,
+    };
+  },
+
+  // ── DOCTOR SITE: Set availability (by day-of-week OR by specific date) ──
+  setAvailability: async ({
+    doctorId,
+    hospitalId,
+    type,
+    day_of_week,
+    specific_date,
+    start_time,
+    end_time,
+    max_patients,
+    slot_duration_minutes,
+  }) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      if (type === "date") {
+        // Deactivate any existing date-specific schedule for this date
+        await client.query(
+          `UPDATE doctor_schedules
+           SET is_active = FALSE
+           WHERE doctor_id = $1 AND specific_date = $2 AND schedule_type = 'date'`,
+          [doctorId, specific_date],
+        );
+        // Insert new date override
+        const result = await client.query(
+          `INSERT INTO doctor_schedules
+             (doctor_id, hospital_id, schedule_type, specific_date, start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active)
+           VALUES ($1,$2,'date',$3,$4,$5,$6,$7,TRUE) RETURNING *`,
+          [
+            doctorId,
+            hospitalId || null,
+            specific_date,
+            start_time,
+            end_time,
+            slot_duration_minutes || 30,
+            max_patients || 1,
+          ],
+        );
+        await client.query("COMMIT");
+        return result.rows[0];
+      } else {
+        // type === "day" — only update if no active date-specific schedule exists for today's weekday slots
+        await client.query(
+          `UPDATE doctor_schedules
+           SET is_active = FALSE
+           WHERE doctor_id = $1 AND day_of_week = $2 AND schedule_type = 'day'`,
+          [doctorId, day_of_week],
+        );
+        const result = await client.query(
+          `INSERT INTO doctor_schedules
+             (doctor_id, hospital_id, schedule_type, day_of_week, start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active)
+           VALUES ($1,$2,'day',$3,$4,$5,$6,$7,TRUE) RETURNING *`,
+          [
+            doctorId,
+            hospitalId || null,
+            day_of_week,
+            start_time,
+            end_time,
+            slot_duration_minutes || 30,
+            max_patients || 1,
+          ],
+        );
+        await client.query("COMMIT");
+        return result.rows[0];
+      }
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  // ── DOCTOR SITE: Panel/dashboard summary ──
+  getDoctorPanel: async (doctorId) => {
+    const today = new Date().toISOString().split("T")[0];
+
+    const [
+      totalPatientsResult,
+      todayAppointmentsResult,
+      upcomingResult,
+      doctorResult,
+    ] = await Promise.all([
+      // Total unique patients
+      pool.query(
+        `SELECT COUNT(DISTINCT user_id)::int AS total_patients FROM appointments WHERE doctor_id = $1`,
+        [doctorId],
+      ),
+      // Today's appointments with patient info
+      pool.query(
+        `SELECT a.*, up.first_name, up.last_name, up.phone, u.email
+         FROM appointments a
+         JOIN users u ON u.id = a.user_id
+         LEFT JOIN user_profiles up ON up.user_id = u.id
+         WHERE a.doctor_id = $1 AND a.appointment_date = $2
+         ORDER BY a.start_time ASC`,
+        [doctorId, today],
+      ),
+      // Upcoming appointments (next 7 days excluding today)
+      pool.query(
+        `SELECT COUNT(*)::int AS upcoming_count
+         FROM appointments
+         WHERE doctor_id = $1 AND appointment_date > $2 AND appointment_date <= ($2::date + INTERVAL '7 days')
+           AND status = ANY($3::appointment_status[])`,
+        [doctorId, today, APPOINTMENT_ACTIVE_STATUSES],
+      ),
+      // Doctor basic info
+      pool.query(
+        `SELECT d.*, up.first_name, up.last_name, s.name AS specialization_name
+         FROM doctors d
+         LEFT JOIN user_profiles up ON up.user_id = d.user_id
+         LEFT JOIN specializations s ON s.id = d.specialization_id
+         WHERE d.id = $1`,
+        [doctorId],
+      ),
+    ]);
+
+    return {
+      doctor: doctorResult.rows[0] || null,
+      total_patients: totalPatientsResult.rows[0]?.total_patients || 0,
+      today_date: today,
+      today_appointments: todayAppointmentsResult.rows,
+      today_appointment_count: todayAppointmentsResult.rowCount,
+      upcoming_7days_count: upcomingResult.rows[0]?.upcoming_count || 0,
+    };
+  },
 };
 
 doctorService.addDoctor = async (payload) => {
@@ -456,46 +698,106 @@ doctorService.addDoctor = async (payload) => {
       bio,
     } = payload;
 
-    // 1. Create user
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    const userResult = await client.query(
-      `INSERT INTO users (email, password_hash, role)
-       VALUES ($1, $2, 'doctor')
-       RETURNING id`,
-      [email, hashedPassword],
+    // 1. Check if user already exists (from register call)
+    const userCheck = await client.query(
+      `SELECT id FROM users WHERE email = $1`,
+      [email],
     );
 
-    const userId = userResult.rows[0].id;
+    let userId;
+    if (userCheck.rowCount > 0) {
+      // User already exists from register call
+      userId = userCheck.rows[0].id;
 
-    // 2. Create profile
-    await client.query(
-      `INSERT INTO user_profiles (user_id, first_name, last_name)
-       VALUES ($1, $2, $3)`,
-      [userId, first_name, last_name],
+      // Update user profile if it exists
+      const profileCheck = await client.query(
+        `SELECT id FROM user_profiles WHERE user_id = $1`,
+        [userId],
+      );
+
+      if (profileCheck.rowCount > 0) {
+        await client.query(
+          `UPDATE user_profiles SET first_name = $1, last_name = $2 WHERE user_id = $3`,
+          [first_name, last_name, userId],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO user_profiles (user_id, first_name, last_name)
+           VALUES ($1, $2, $3)`,
+          [userId, first_name, last_name],
+        );
+      }
+    } else {
+      // Create new user (for backwards compatibility)
+      const hashedPassword = await bcrypt.hash(password, 12);
+
+      const userResult = await client.query(
+        `INSERT INTO users (email, password_hash, role)
+         VALUES ($1, $2, 'doctor')
+         RETURNING id`,
+        [email, hashedPassword],
+      );
+
+      userId = userResult.rows[0].id;
+
+      // Create profile
+      await client.query(
+        `INSERT INTO user_profiles (user_id, first_name, last_name)
+         VALUES ($1, $2, $3)`,
+        [userId, first_name, last_name],
+      );
+    }
+
+    // 2. Check if doctor record already exists for this user
+    const doctorCheck = await client.query(
+      `SELECT id FROM doctors WHERE user_id = $1`,
+      [userId],
     );
 
-    // 3. Create doctor
-    const doctorResult = await client.query(
-      `INSERT INTO doctors (
-        user_id,
-        specialization_id,
-        license_number,
-        years_of_experience,
-        consultation_fee,
-        bio
-      )
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING *`,
-      [
-        userId,
-        specialization_id,
-        license_number,
-        years_of_experience || 0,
-        consultation_fee || 0,
-        bio || null,
-      ],
-    );
+    let doctorResult;
+    if (doctorCheck.rowCount > 0) {
+      // Update existing doctor record
+      doctorResult = await client.query(
+        `UPDATE doctors SET 
+          specialization_id = $1,
+          license_number = $2,
+          years_of_experience = $3,
+          consultation_fee = $4,
+          bio = $5
+        WHERE user_id = $6
+        RETURNING *`,
+        [
+          specialization_id,
+          license_number,
+          years_of_experience || 0,
+          consultation_fee || 0,
+          bio || null,
+          userId,
+        ],
+      );
+    } else {
+      // Create new doctor record
+      doctorResult = await client.query(
+        `INSERT INTO doctors (
+          user_id,
+          specialization_id,
+          license_number,
+          years_of_experience,
+          consultation_fee,
+          bio
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *`,
+        [
+          userId,
+          specialization_id,
+          license_number,
+          years_of_experience || 0,
+          consultation_fee || 0,
+          bio || null,
+        ],
+      );
+    }
 
     await client.query("COMMIT");
     return doctorResult.rows[0];
@@ -1293,6 +1595,80 @@ const doctorController = {
     );
     sendSuccess(res, 200, "Schedules fetched successfully", availability);
   }),
+
+  // ── DOCTOR SITE CONTROLLERS ──
+  getDoctorAppointments: asyncHandler(async (req, res) => {
+    const doctorId = normalizeNumericId(req.params.doctorId);
+    if (!doctorId) return sendError(res, 400, "Valid doctorId is required");
+    const { page, limit, offset } = parsePagination(req.query);
+    const data = await doctorService.getDoctorAppointments({
+      doctorId,
+      date: req.query.date || null,
+      month: req.query.month ? Number(req.query.month) : null,
+      year: req.query.year ? Number(req.query.year) : null,
+      page,
+      limit,
+      offset,
+    });
+    sendSuccess(res, 200, "Doctor appointments fetched successfully", data);
+  }),
+
+  getDoctorPatients: asyncHandler(async (req, res) => {
+    const doctorId = normalizeNumericId(req.params.doctorId);
+    if (!doctorId) return sendError(res, 400, "Valid doctorId is required");
+    const { page, limit, offset } = parsePagination(req.query);
+    const data = await doctorService.getDoctorPatients({
+      doctorId,
+      page,
+      limit,
+      offset,
+    });
+    sendSuccess(res, 200, "Doctor patients fetched successfully", data);
+  }),
+
+  setAvailability: asyncHandler(async (req, res) => {
+    const doctorId = normalizeNumericId(req.params.doctorId);
+    if (!doctorId) return sendError(res, 400, "Valid doctorId is required");
+
+    const {
+      type,
+      day_of_week,
+      specific_date,
+      start_time,
+      end_time,
+      max_patients,
+      hospital_id,
+      slot_duration_minutes,
+    } = req.body;
+    if (!type || !["day", "date"].includes(type))
+      return sendError(res, 400, "type must be 'day' or 'date'");
+    if (type === "day" && (day_of_week === undefined || day_of_week === null))
+      return sendError(res, 400, "day_of_week (0-6) required for type 'day'");
+    if (type === "date" && !specific_date)
+      return sendError(res, 400, "specific_date required for type 'date'");
+    if (!start_time || !end_time)
+      return sendError(res, 400, "start_time and end_time are required");
+
+    const schedule = await doctorService.setAvailability({
+      doctorId,
+      hospitalId: hospital_id ? normalizeNumericId(hospital_id) : null,
+      type,
+      day_of_week,
+      specific_date,
+      start_time,
+      end_time,
+      max_patients: max_patients || 1,
+      slot_duration_minutes: slot_duration_minutes || 30,
+    });
+    sendSuccess(res, 201, "Availability set successfully", schedule);
+  }),
+
+  getDoctorPanel: asyncHandler(async (req, res) => {
+    const doctorId = normalizeNumericId(req.params.doctorId);
+    if (!doctorId) return sendError(res, 400, "Valid doctorId is required");
+    const panel = await doctorService.getDoctorPanel(doctorId);
+    sendSuccess(res, 200, "Doctor panel fetched successfully", panel);
+  }),
 };
 
 doctorController.addDoctor = asyncHandler(async (req, res) => {
@@ -1668,6 +2044,293 @@ const reviewController = {
   }),
 };
 
+// ── ADMIN SERVICE ──
+const adminService = {
+  // Dashboard analytics
+  getDashboardStats: async () => {
+    const today = new Date().toISOString().split("T")[0];
+
+    const [
+      totalUsersResult,
+      totalDoctorsResult,
+      totalAppointmentsResult,
+      todayAppointmentsResult,
+      appointmentsByStatusResult,
+      newUsersThisMonthResult,
+      topDoctorsResult,
+      revenueResult,
+    ] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS total FROM users WHERE role = 'user'`,
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS total FROM users WHERE role = 'doctor'`,
+      ),
+      pool.query(`SELECT COUNT(*)::int AS total FROM appointments`),
+      pool.query(
+        `SELECT COUNT(*)::int AS total FROM appointments WHERE appointment_date = $1`,
+        [today],
+      ),
+      pool.query(
+        `SELECT status, COUNT(*)::int AS count FROM appointments GROUP BY status ORDER BY count DESC`,
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS total FROM users
+         WHERE role='user' AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())`,
+      ),
+      pool.query(
+        `SELECT d.id, up.first_name, up.last_name, s.name AS specialization,
+           d.average_rating, d.total_reviews,
+           COUNT(a.id)::int AS total_appointments
+         FROM doctors d
+         LEFT JOIN user_profiles up ON up.user_id = d.user_id
+         LEFT JOIN specializations s ON s.id = d.specialization_id
+         LEFT JOIN appointments a ON a.doctor_id = d.id
+         GROUP BY d.id, up.first_name, up.last_name, s.name, d.average_rating, d.total_reviews
+         ORDER BY total_appointments DESC LIMIT 5`,
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS total_revenue,
+           COALESCE(SUM(CASE WHEN DATE_TRUNC('month',created_at)=DATE_TRUNC('month',NOW()) THEN amount END),0)::numeric AS revenue_this_month
+         FROM payments WHERE status='paid'`,
+      ),
+    ]);
+
+    // Appointments per month (last 6 months)
+    const monthlyResult = await pool.query(
+      `SELECT TO_CHAR(appointment_date,'YYYY-MM') AS month, COUNT(*)::int AS count
+       FROM appointments
+       WHERE appointment_date >= NOW() - INTERVAL '6 months'
+       GROUP BY month ORDER BY month ASC`,
+    );
+
+    return {
+      totals: {
+        patients: totalUsersResult.rows[0]?.total || 0,
+        doctors: totalDoctorsResult.rows[0]?.total || 0,
+        appointments: totalAppointmentsResult.rows[0]?.total || 0,
+        today_appointments: todayAppointmentsResult.rows[0]?.total || 0,
+        new_patients_this_month: newUsersThisMonthResult.rows[0]?.total || 0,
+      },
+      revenue: revenueResult.rows[0] || {
+        total_revenue: 0,
+        revenue_this_month: 0,
+      },
+      appointments_by_status: appointmentsByStatusResult.rows,
+      monthly_appointments: monthlyResult.rows,
+      top_doctors: topDoctorsResult.rows,
+    };
+  },
+
+  // Get all patients (users with role='user')
+  getAllPatients: async ({ search, page, limit, offset }) => {
+    const values = [];
+    let searchClause = "";
+    if (search) {
+      values.push(`%${search}%`);
+      searchClause = `AND (u.email ILIKE $${values.length} OR up.first_name ILIKE $${values.length} OR up.last_name ILIKE $${values.length})`;
+    }
+    values.push(limit);
+    values.push(offset);
+
+    const query = `
+      SELECT u.id, u.email, u.is_active, u.created_at,
+        up.first_name, up.last_name, up.phone, up.date_of_birth, up.gender, up.blood_group,
+        up.city, up.country,
+        (SELECT COUNT(*)::int FROM appointments WHERE user_id = u.id) AS total_appointments
+      FROM users u
+      LEFT JOIN user_profiles up ON up.user_id = u.id
+      WHERE u.role = 'user' ${searchClause}
+      ORDER BY u.created_at DESC
+      LIMIT $${values.length - 1} OFFSET $${values.length}`;
+
+    const countValues = values.slice(0, values.length - 2);
+    const countQuery = `SELECT COUNT(*)::int AS total FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id WHERE u.role='user' ${searchClause}`;
+
+    const [listResult, countResult] = await Promise.all([
+      pool.query(query, values),
+      pool.query(countQuery, countValues),
+    ]);
+    const total = countResult.rows[0]?.total || 0;
+    return {
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit) || 1,
+      items: listResult.rows,
+    };
+  },
+
+  // Get all doctors with stats
+  getAllDoctorsAdmin: async ({
+    search,
+    specializationId,
+    page,
+    limit,
+    offset,
+  }) => {
+    const filters = ["u.role = 'doctor'"];
+    const values = [];
+    if (search) {
+      values.push(`%${search}%`);
+      filters.push(
+        `(u.email ILIKE $${values.length} OR up.first_name ILIKE $${values.length} OR up.last_name ILIKE $${values.length})`,
+      );
+    }
+    if (specializationId) {
+      values.push(specializationId);
+      filters.push(`d.specialization_id = $${values.length}`);
+    }
+    const whereClause = `WHERE ${filters.join(" AND ")}`;
+    values.push(limit);
+    values.push(offset);
+
+    const query = `
+      SELECT u.id AS user_id, u.email, u.is_active, u.created_at,
+        d.id AS doctor_id, d.license_number, d.years_of_experience, d.consultation_fee,
+        d.average_rating, d.total_reviews, d.bio,
+        s.name AS specialization_name,
+        up.first_name, up.last_name, up.phone,
+        (SELECT COUNT(*)::int FROM appointments WHERE doctor_id = d.id) AS total_appointments,
+        (SELECT COUNT(DISTINCT user_id)::int FROM appointments WHERE doctor_id = d.id) AS total_patients
+      FROM users u
+      JOIN doctors d ON d.user_id = u.id
+      LEFT JOIN user_profiles up ON up.user_id = u.id
+      LEFT JOIN specializations s ON s.id = d.specialization_id
+      ${whereClause}
+      ORDER BY u.created_at DESC
+      LIMIT $${values.length - 1} OFFSET $${values.length}`;
+
+    const countValues = values.slice(0, values.length - 2);
+    const countQuery = `
+      SELECT COUNT(*)::int AS total FROM users u
+      JOIN doctors d ON d.user_id = u.id
+      LEFT JOIN user_profiles up ON up.user_id = u.id
+      ${whereClause}`;
+
+    const [listResult, countResult] = await Promise.all([
+      pool.query(query, values),
+      pool.query(countQuery, countValues),
+    ]);
+    const total = countResult.rows[0]?.total || 0;
+    return {
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit) || 1,
+      items: listResult.rows,
+    };
+  },
+
+  // Toggle user active/inactive status (soft delete)
+  setUserActiveStatus: async (userId, isActive) => {
+    const result = await pool.query(
+      `UPDATE users SET is_active=$2 WHERE id=$1 RETURNING id, email, role, is_active`,
+      [userId, isActive],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Hard delete a user (cascades based on DB FK constraints)
+  deleteUser: async (userId) => {
+    const result = await pool.query(
+      `DELETE FROM users WHERE id=$1 RETURNING id, email, role`,
+      [userId],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Per-doctor analytics: how many patients each doctor sees
+  getDoctorPatientAnalytics: async () => {
+    const result = await pool.query(
+      `SELECT d.id AS doctor_id,
+         up.first_name, up.last_name,
+         s.name AS specialization,
+         d.average_rating,
+         COUNT(DISTINCT a.user_id)::int AS unique_patients,
+         COUNT(a.id)::int AS total_appointments,
+         COUNT(CASE WHEN a.status='completed' THEN 1 END)::int AS completed_appointments,
+         COUNT(CASE WHEN a.status='cancelled' THEN 1 END)::int AS cancelled_appointments,
+         COUNT(CASE WHEN a.appointment_date = CURRENT_DATE THEN 1 END)::int AS today_appointments
+       FROM doctors d
+       LEFT JOIN user_profiles up ON up.user_id = d.user_id
+       LEFT JOIN specializations s ON s.id = d.specialization_id
+       LEFT JOIN appointments a ON a.doctor_id = d.id
+       GROUP BY d.id, up.first_name, up.last_name, s.name, d.average_rating
+       ORDER BY unique_patients DESC`,
+    );
+    return result.rows;
+  },
+};
+
+// ── ADMIN CONTROLLER ──
+const adminController = {
+  getDashboardStats: asyncHandler(async (req, res) => {
+    const stats = await adminService.getDashboardStats();
+    sendSuccess(res, 200, "Dashboard stats fetched successfully", stats);
+  }),
+
+  getAllPatients: asyncHandler(async (req, res) => {
+    const { page, limit, offset } = parsePagination(req.query);
+    const data = await adminService.getAllPatients({
+      search: req.query.search || null,
+      page,
+      limit,
+      offset,
+    });
+    sendSuccess(res, 200, "Patients fetched successfully", data);
+  }),
+
+  getAllDoctorsAdmin: asyncHandler(async (req, res) => {
+    const { page, limit, offset } = parsePagination(req.query);
+    const specializationId = req.query.specialization_id
+      ? normalizeNumericId(req.query.specialization_id)
+      : null;
+    const data = await adminService.getAllDoctorsAdmin({
+      search: req.query.search || null,
+      specializationId,
+      page,
+      limit,
+      offset,
+    });
+    sendSuccess(res, 200, "Doctors fetched successfully", data);
+  }),
+
+  setUserActiveStatus: asyncHandler(async (req, res) => {
+    const userId = normalizeNumericId(req.params.userId);
+    if (!userId || typeof req.body.is_active !== "boolean")
+      return sendError(
+        res,
+        400,
+        "Valid userId and is_active boolean are required",
+      );
+    const user = await adminService.setUserActiveStatus(
+      userId,
+      req.body.is_active,
+    );
+    if (!user) return sendError(res, 404, "User not found");
+    sendSuccess(
+      res,
+      200,
+      `User ${req.body.is_active ? "activated" : "deactivated"} successfully`,
+      user,
+    );
+  }),
+
+  deleteUser: asyncHandler(async (req, res) => {
+    const userId = normalizeNumericId(req.params.userId);
+    if (!userId) return sendError(res, 400, "Valid userId is required");
+    const user = await adminService.deleteUser(userId);
+    if (!user) return sendError(res, 404, "User not found");
+    sendSuccess(res, 200, "User deleted successfully", user);
+  }),
+
+  getDoctorPatientAnalytics: asyncHandler(async (req, res) => {
+    const data = await adminService.getDoctorPatientAnalytics();
+    sendSuccess(res, 200, "Doctor analytics fetched successfully", data);
+  }),
+};
+
 router.post("/auth/register", authController.registerUser);
 router.post("/auth/login", authController.loginUser);
 
@@ -1681,6 +2344,59 @@ router.get(
   "/doctors/:doctorId/schedules",
   doctorController.getAvailableSchedules,
 );
+
+// ── Specializations ──
+router.get(
+  "/specializations",
+  asyncHandler(async (req, res) => {
+    const result = await pool.query(
+      `SELECT id, name FROM specializations ORDER BY name ASC`,
+    );
+    sendSuccess(res, 200, "Specializations fetched successfully", result.rows);
+  }),
+);
+
+router.post(
+  "/specializations",
+  asyncHandler(async (req, res) => {
+    const { name, description } = req.body;
+    if (!name || name.trim().length === 0) {
+      return sendError(res, 400, "Specialization name is required");
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO specializations (name, description) 
+         VALUES ($1, $2) 
+         RETURNING id, name, description`,
+        [name.trim(), description || null],
+      );
+      sendSuccess(
+        res,
+        201,
+        "Specialization created successfully",
+        result.rows[0],
+      );
+    } catch (err) {
+      if (err.code === "23505") {
+        return sendError(res, 409, "Specialization already exists");
+      }
+      throw err;
+    }
+  }),
+);
+
+// ── Doctor Site Routes ──
+router.get(
+  "/doctors/:doctorId/appointments",
+  doctorController.getDoctorAppointments,
+);
+router.get("/doctors/:doctorId/patients", doctorController.getDoctorPatients);
+router.post(
+  "/doctors/:doctorId/availability",
+  doctorController.setAvailability,
+);
+router.get("/doctors/:doctorId/panel", doctorController.getDoctorPanel);
 
 router.post("/appointments", appointmentController.bookAppointment);
 router.patch(
@@ -1721,6 +2437,20 @@ router.patch(
 
 router.post("/reviews", reviewController.addDoctorReview);
 router.post("/doctors", doctorController.addDoctor);
+
+// ── Admin Routes ──
+router.get("/admin/dashboard", adminController.getDashboardStats);
+router.get("/admin/patients", adminController.getAllPatients);
+router.get("/admin/doctors", adminController.getAllDoctorsAdmin);
+router.patch(
+  "/admin/users/:userId/status",
+  adminController.setUserActiveStatus,
+);
+router.delete("/admin/users/:userId", adminController.deleteUser);
+router.get(
+  "/admin/analytics/doctors",
+  adminController.getDoctorPatientAnalytics,
+);
 module.exports = {
   pool,
   router,
@@ -1733,5 +2463,6 @@ module.exports = {
     ...paymentController,
     ...notificationController,
     ...reviewController,
+    ...adminController,
   },
 };
