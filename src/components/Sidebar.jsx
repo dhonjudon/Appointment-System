@@ -25,7 +25,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       {/* Logo Area */}
       <div className="p-6 flex items-center justify-start">
         <img
-          src="/lightlogo.jpeg"
+          src="/logoimage.png"
           alt="Swastha Sewa Logo"
           className="h-16 w-auto object-contain mix-blend-screen"
           onError={(e) => {
