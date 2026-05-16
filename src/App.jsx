@@ -59,9 +59,11 @@ import Register from "./pages/Register";
 import DoctorLogin from "./pages/DoctorLogin";
 import DoctorRegister from "./pages/DoctorRegister";
 import Dashboard from "./pages/Dashboard";
-import AppointmentBooked from "./pages/AppointmentBooked";
 import DoctorsList from "./pages/DoctorsList";
 import DoctorProfile from "./pages/DoctorProfile";
+import BookAppointmentFlow from "./pages/BookAppointmentFlow";
+import AppointmentSuccess from "./pages/AppointmentSuccess";
+
 import BookAppointment from "./pages/BookAppointment";
 import AppointmentSetup from "./pages/doctor/AppointmentDetails";
 import DoctorDashboard from "./pages/doctor/dashboard";
@@ -78,9 +80,10 @@ function App() {
           <Route path="/doctor/login" element={<DoctorLogin />} />
           <Route path="/doctor/register" element={<DoctorRegister />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/appointment" element={<AppointmentBooked />} />
+          <Route path="/appointment" element={<AppointmentSuccess />} />
           <Route path="/doctors" element={<DoctorsList />} />
           <Route path="/doctors/:id" element={<DoctorProfile />} />
+          <Route path="/book-appointment" element={<BookAppointmentFlow />} />
           <Route path="/book-appointment" element={<BookAppointment />} />
           <Route path="/doctor/schedule" element={<AppointmentSetup />} />
           <Route path="/doctor/dashboard" element={<DoctorDashboard />} />
