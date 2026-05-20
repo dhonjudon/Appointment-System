@@ -760,97 +760,104 @@ function DoctorsList() {
             const doctorId = doctor.id;
 
             return (
-            <div
-              key={doctorId}
-              role="button"
-              tabIndex={0}
-              onClick={() => doctorId && navigate(`/doctors/${doctorId}`)}
-              onKeyDown={(e) => {
-                if ((e.key === "Enter" || e.key === " ") && doctorId) {
-                  e.preventDefault();
-                  navigate(`/doctors/${doctorId}`);
-                }
-              }}
-              className="group bg-white rounded-2xl border border-gray-100 overflow-hidden hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all duration-300 cursor-pointer"
-            >
-              <div className="p-5">
-                <div className="flex gap-4">
-                  {/* Doctor Image */}
-                  <div className="relative">
-                    <img
-                      src={doctor.image || "https://images.unsplash.com/photo-1527613426441-4da17471b66d?w=150&h=150&fit=crop&crop=face"}
-                      alt={doctor.first_name + " " + doctor.last_name}
-                      className="w-20 h-20 rounded-xl object-cover ring-2 ring-emerald-100 group-hover:ring-emerald-300 transition-all"
-                    />
-                    {doctor.available && (
-                      <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full border-2 border-white flex items-center justify-center">
-                        <div className="w-3 h-3 bg-white rounded-full"></div>
+              <div
+                key={doctorId}
+                role="button"
+                tabIndex={0}
+                onClick={() => doctorId && navigate(`/doctors/${doctorId}`)}
+                onKeyDown={(e) => {
+                  if ((e.key === "Enter" || e.key === " ") && doctorId) {
+                    e.preventDefault();
+                    navigate(`/doctors/${doctorId}`);
+                  }
+                }}
+                className="group bg-white rounded-2xl border border-gray-100 overflow-hidden hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all duration-300 cursor-pointer"
+              >
+                <div className="p-5">
+                  <div className="flex gap-4">
+                    {/* Doctor Image */}
+                    <div className="relative">
+                      <img
+                        src={
+                          doctor.image ||
+                          "https://images.unsplash.com/photo-1527613426441-4da17471b66d?w=150&h=150&fit=crop&crop=face"
+                        }
+                        alt={doctor.first_name + " " + doctor.last_name}
+                        className="w-20 h-20 rounded-xl object-cover ring-2 ring-emerald-100 group-hover:ring-emerald-300 transition-all"
+                      />
+                      {doctor.available && (
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full border-2 border-white flex items-center justify-center">
+                          <div className="w-3 h-3 bg-white rounded-full"></div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-gray-800 text-lg group-hover:text-emerald-600 transition-colors truncate">
+                        {doctor.first_name} {doctor.last_name}
+                      </h3>
+                      <p className="text-emerald-600 text-sm font-medium">
+                        {doctor.specialization_name}
+                      </p>
+                      <div className="flex items-center gap-1 mt-1">
+                        <span className="text-gray-800 font-medium text-sm">
+                          {doctor.average_rating}
+                        </span>
+                        <span className="text-gray-400 text-sm">
+                          ({doctor.total_reviews})
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    {doctor.hospital && (
+                      <div className="flex items-center gap-2 text-sm text-gray-500">
+                        <span>{doctor.hospital}</span>
+                      </div>
+                    )}
+                    {doctor.years_of_experience && (
+                      <div className="flex items-center gap-2 text-sm text-gray-500">
+                        <span>
+                          {doctor.years_of_experience} years experience
+                        </span>
                       </div>
                     )}
                   </div>
 
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-gray-800 text-lg group-hover:text-emerald-600 transition-colors truncate">
-                      {doctor.first_name} {doctor.last_name}
-                    </h3>
-                    <p className="text-emerald-600 text-sm font-medium">
-                      {doctor.specialization_name}
-                    </p>
-                    <div className="flex items-center gap-1 mt-1">
-                      <span className="text-gray-800 font-medium text-sm">
-                        {doctor.average_rating}
+                  <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">
+                    <div>
+                      <span className="text-2xl font-bold text-gray-800">
+                        Rs. {doctor.consultation_fee}
                       </span>
-                      <span className="text-gray-400 text-sm">
-                        ({doctor.total_reviews})
+                      <span className="text-gray-400 text-sm ml-1">
+                        / visithi
                       </span>
                     </div>
+                    <Link
+                      to={`/doctors/${doctorId}`}
+                      onClick={(e) => {
+                        if (!doctorId) {
+                          e.preventDefault();
+                          return;
+                        }
+                        e.stopPropagation();
+                      }}
+                      className="px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600 transition-all shadow-md shadow-emerald-100 hover:shadow-lg hover:shadow-emerald-200"
+                    >
+                      Book Now
+                    </Link>
                   </div>
-                </div>
 
-                <div className="mt-4 space-y-2">
-                  {doctor.hospital && (
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <span>{doctor.hospital}</span>
+                  {doctor.available && doctor.nextAvailable && (
+                    <div className="mt-3 flex items-center gap-2 text-emerald-600 text-sm">
+                      <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                      <span>Next available: {doctor.nextAvailable}</span>
                     </div>
                   )}
-                  {doctor.years_of_experience && (
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <span>{doctor.years_of_experience} years experience</span>
-                    </div>
-                  )}
                 </div>
-
-                <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">
-                  <div>
-                    <span className="text-2xl font-bold text-gray-800">
-                      ${doctor.consultation_fee}
-                    </span>
-                    <span className="text-gray-400 text-sm ml-1">/ visit</span>
-                  </div>
-                  <Link
-                    to={`/doctors/${doctorId}`}
-                    onClick={(e) => {
-                      if (!doctorId) {
-                        e.preventDefault();
-                        return;
-                      }
-                      e.stopPropagation();
-                    }}
-                    className="px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600 transition-all shadow-md shadow-emerald-100 hover:shadow-lg hover:shadow-emerald-200"
-                  >
-                    Book Now
-                  </Link>
-                </div>
-
-                {doctor.available && doctor.nextAvailable && (
-                  <div className="mt-3 flex items-center gap-2 text-emerald-600 text-sm">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                    <span>Next available: {doctor.nextAvailable}</span>
-                  </div>
-                )}
               </div>
-            </div>
             );
           })}
         </div>

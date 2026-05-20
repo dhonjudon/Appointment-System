@@ -9,8 +9,8 @@ router.use(cors());
 router.use(express.json());
 
 const pool = new Pool({
-  user: process.env.PGUSER || "sasika",
-  password: process.env.PGPASSWORD || "1903sasika400",
+  user: process.env.PGUSER || "dijankarki",
+  password: process.env.PGPASSWORD || "",
   host: process.env.PGHOST || "localhost",
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || "doctor_appointment_system",
