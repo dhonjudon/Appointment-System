@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import DoctorSidebar from "../../components/DoctorSidebar";
+import { Link } from "react-router-dom";
 import {
   LayoutDashboard,
   Users,
@@ -12,6 +14,10 @@ import {
   ChevronDown,
   AlertCircle,
   Loader,
+  UserRound,
+  CheckCircle2,
+  CalendarClock,
+  X,
 } from "lucide-react";
 import {
   format,
@@ -30,18 +36,20 @@ import {
   getDay,
 } from "date-fns";
 import logoImg from "../../assets/logoimage.png";
+import { NotificationBell } from "../../components/NotificationBell";
+import { useNotification } from "../../context/useNotification";
 
 // ── API BASE URL ──────────────────────────────────────────────────────────────
 const API_BASE = "http://localhost:3000/api";
 
 const NAV_ITEMS = [
-  { label: "Dashboard", Icon: LayoutDashboard, to: "/" },
+  { label: "Dashboard", Icon: LayoutDashboard, to: "/doctor/dashboard" },
   { label: "Patients", Icon: Users, to: "/doctor/patients" },
   { label: "Appointments", Icon: CalendarDays, to: "/doctor/appointments" },
   { label: "Schedule Setup", Icon: Settings, to: "/doctor/schedule" },
+  { label: "Profile", Icon: UserRound, to: "/doctor/profile" },
 ];
 
-// ── color config ──────────────────────────────────────────────────────────────
 const TYPE = {
   consult: {
     dot: "bg-emerald-500",
@@ -61,7 +69,48 @@ const TYPE = {
   },
 };
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 7 AM → 8 PM
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 7);
+
+const toDateKey = (value) => {
+  if (!value) return "";
+  if (typeof value === "string" && !value.includes("T")) {
+    return value.slice(0, 10);
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
+};
+
+const ACTIVE_APPOINTMENT_STATUSES = new Set([
+  "pending",
+  "confirmed",
+  "rescheduled",
+]);
+
+const timeToMinutes = (value) => {
+  if (!value) return 0;
+  const [hours, minutes] = value.slice(0, 5).split(":").map(Number);
+  return hours * 60 + minutes;
+};
+
+const minutesToTime = (value) => {
+  const hours = Math.floor(value / 60) % 24;
+  const minutes = value % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`;
+};
+
+const formatTimeLabel = (value) => {
+  const minutes = timeToMinutes(value);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const ampm = hours >= 12 ? "PM" : "AM";
+  const displayHour = hours % 12 || 12;
+  return `${displayHour}:${String(mins).padStart(2, "0")} ${ampm}`;
+};
+
+const isSameDateKey = (left, right) => left && right && left === right;
+
+const rangesOverlap = (startA, endA, startB, endB) =>
+  !(endA <= startB || startA >= endB);
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 function Sidebar({ open, setOpen, activePath, doctorData }) {
@@ -183,7 +232,7 @@ function MiniCalendar({ selectedDate, setSelectedDate, appointments }) {
     !!appointments && !!appointments[format(day, "yyyy-MM-dd")];
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 w-[429px] shrink-0">
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 w-107.25 shrink-0">
       {/* Month nav */}
       <div className="flex items-center justify-between border-b-2 border-[#A7A7A7] py-3 mb-2">
         <button
@@ -226,14 +275,14 @@ function MiniCalendar({ selectedDate, setSelectedDate, appointments }) {
             <button
               key={idx}
               onClick={() => setSelectedDate(day)}
-              className={`relative w-[40px] h-[40px] m-1 flex flex-col items-center justify-center rounded-full text-[16px] font-light transition-all
+              className={`relative w-10 h-10 m-1 flex flex-col items-center justify-center rounded-full text-[16px] font-light transition-all
                 ${isSelected ? "bg-[#51C833] text-white shadow-sm" : isTod ? "bg-emerald-100 text-emerald-700" : inMonth ? "text-gray-700 hover:bg-emerald-50" : "text-gray-300"}
               `}
             >
               {format(day, "d")}
               {hasA && !isSelected && (
                 <span
-                  className={`absolute bottom-0.5 w-[6px] h-[6px] rounded-full ${isTod ? "bg-[#51C833]" : "bg-[#51C833]"}`}
+                  className={`absolute bottom-0.5 w-1.5 h-1.5 rounded-full ${isTod ? "bg-[#51C833]" : "bg-[#51C833]"}`}
                 />
               )}
             </button>
@@ -245,7 +294,13 @@ function MiniCalendar({ selectedDate, setSelectedDate, appointments }) {
 }
 
 // ── Left Time Schedule ────────────────────────────────────────────────────────
-function TimeSchedule({ selectedDate, appointments }) {
+function TimeSchedule({
+  selectedDate,
+  appointments,
+  onCancel,
+  onComplete,
+  onReschedule,
+}) {
   const [expandedId, setExpandedId] = useState(null);
   const dateKey = format(selectedDate, "yyyy-MM-dd");
   const appts = appointments[dateKey] || [];
@@ -262,7 +317,7 @@ function TimeSchedule({ selectedDate, appointments }) {
         return (
           <div
             key={hour}
-            className="flex flex-row items-center gap-3 mt-5 relative min-h-[44px]  group"
+            className="flex flex-row items-center gap-3 mt-5 relative min-h-11 group"
           >
             {/* Time label */}
             <div className="w-14 shrink-0  text-[13px] text-gray-600 font-semibold text-right">
@@ -306,6 +361,11 @@ function TimeSchedule({ selectedDate, appointments }) {
                             >
                               {t.label}
                             </span>
+                            <span
+                              className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full inline-block ${appt.status === "completed" ? "bg-blue-100 text-blue-700" : appt.status === "cancelled" ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}
+                            >
+                              {appt.status}
+                            </span>
                           </div>
                           <div className="flex flex-col items-end shrink-0">
                             <p className="text-[11px] text-gray-500 font-semibold">
@@ -321,6 +381,50 @@ function TimeSchedule({ selectedDate, appointments }) {
                         <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                           {appt.desc}
                         </p>
+                        <div className="mt-3 flex items-center gap-2 flex-wrap">
+                          {ACTIVE_APPOINTMENT_STATUSES.has(appt.status) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onReschedule?.(appt);
+                                }}
+                                className="inline-flex z-50 items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-bold hover:bg-emerald-700 transition"
+                              >
+                                <CalendarClock className="w-3.5 h-3.5" />
+                                Reschedule
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onComplete?.(appt);
+                                }}
+                                className="inline-flex z-50 items-center justify-center w-8 h-8 rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 transition"
+                                title="Mark completed"
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onCancel?.(appt);
+                                }}
+                                className="inline-flex z-50 items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white text-red-600 text-[11px] font-bold hover:bg-red-50 transition"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                Cancel
+                              </button>
+                            </>
+                          )}
+                          {!ACTIVE_APPOINTMENT_STATUSES.has(appt.status) && (
+                            <span className="text-[11px] font-semibold text-gray-500">
+                              No actions available for this appointment.
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -334,6 +438,339 @@ function TimeSchedule({ selectedDate, appointments }) {
   );
 }
 
+function DoctorRescheduleModal({
+  open,
+  doctorId,
+  appointment,
+  onClose,
+  onSaved,
+}) {
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [reason, setReason] = useState("");
+  const [schedules, setSchedules] = useState([]);
+  const [dateAppointments, setDateAppointments] = useState([]);
+  const [loadingSchedules, setLoadingSchedules] = useState(false);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const { addToast } = useNotification();
+
+  const appointmentDuration = useMemo(() => {
+    if (!appointment) return 30;
+    const duration =
+      timeToMinutes(appointment.end_time) -
+      timeToMinutes(appointment.start_time);
+    return duration > 0 ? duration : 30;
+  }, [appointment]);
+
+  useEffect(() => {
+    if (!open || !appointment) return;
+    setSelectedDate(toDateKey(appointment.appointment_date));
+    setSelectedSlot(null);
+    setReason("");
+    setError("");
+  }, [open, appointment]);
+
+  useEffect(() => {
+    if (!open || !doctorId) return;
+
+    const fetchSchedules = async () => {
+      try {
+        setLoadingSchedules(true);
+        const res = await fetch(
+          `${API_BASE}/doctors/${doctorId}/all-schedules`,
+        );
+        if (!res.ok) throw new Error("Unable to load doctor schedules");
+        const data = await res.json();
+        setSchedules(data.data?.items || []);
+      } catch (err) {
+        setError(err.message || "Unable to load doctor schedules");
+      } finally {
+        setLoadingSchedules(false);
+      }
+    };
+
+    fetchSchedules();
+  }, [open, doctorId]);
+
+  useEffect(() => {
+    if (!open || !doctorId || !selectedDate) return;
+
+    const fetchDateAppointments = async () => {
+      try {
+        setLoadingSlots(true);
+        const res = await fetch(
+          `${API_BASE}/doctors/${doctorId}/appointments?date=${selectedDate}&page=1&limit=200`,
+        );
+        if (!res.ok)
+          throw new Error("Unable to load appointments for reschedule");
+        const data = await res.json();
+        setDateAppointments(data.data?.items || []);
+      } catch (err) {
+        setError(err.message || "Unable to load appointments for reschedule");
+      } finally {
+        setLoadingSlots(false);
+      }
+    };
+
+    fetchDateAppointments();
+  }, [open, doctorId, selectedDate]);
+
+  const availableSlots = useMemo(() => {
+    if (!appointment || !selectedDate) return [];
+
+    const selectedDay = new Date(`${selectedDate}T00:00:00`);
+    if (Number.isNaN(selectedDay.getTime())) return [];
+
+    const matchingSchedules = schedules.filter((schedule) => {
+      if (schedule.schedule_type === "date") {
+        return isSameDateKey(toDateKey(schedule.specific_date), selectedDate);
+      }
+      return Number(schedule.day_of_week) === selectedDay.getDay();
+    });
+
+    const existingAppointments = dateAppointments.filter((item) => {
+      if (item.id === appointment.id) return false;
+      return ACTIVE_APPOINTMENT_STATUSES.has(item.status);
+    });
+
+    const slots = [];
+    const seen = new Set();
+
+    matchingSchedules.forEach((schedule) => {
+      const scheduleStart = timeToMinutes(schedule.start_time);
+      const scheduleEnd = timeToMinutes(schedule.end_time);
+      const step = Number(schedule.slot_duration_minutes || 30);
+
+      for (
+        let start = scheduleStart;
+        start + appointmentDuration <= scheduleEnd;
+        start += step
+      ) {
+        const end = start + appointmentDuration;
+        const conflict = existingAppointments.some((item) =>
+          rangesOverlap(
+            timeToMinutes(item.start_time),
+            timeToMinutes(item.end_time),
+            start,
+            end,
+          ),
+        );
+
+        if (conflict) continue;
+
+        const slotKey = `${minutesToTime(start)}-${minutesToTime(end)}`;
+        if (seen.has(slotKey)) continue;
+        seen.add(slotKey);
+
+        slots.push({
+          start_time: minutesToTime(start),
+          end_time: minutesToTime(end),
+          label: `${formatTimeLabel(minutesToTime(start))} - ${formatTimeLabel(minutesToTime(end))}`,
+        });
+      }
+    });
+
+    return slots.sort(
+      (left, right) =>
+        timeToMinutes(left.start_time) - timeToMinutes(right.start_time),
+    );
+  }, [
+    appointment,
+    selectedDate,
+    schedules,
+    dateAppointments,
+    appointmentDuration,
+  ]);
+
+  const handleSubmit = async () => {
+    if (!appointment || !doctorId || !selectedDate || !selectedSlot) return;
+
+    try {
+      setSubmitting(true);
+      setError("");
+      const res = await fetch(
+        `${API_BASE}/doctors/${doctorId}/appointments/${appointment.id}/reschedule`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            new_appointment_date: selectedDate,
+            new_start_time: selectedSlot.start_time,
+            new_end_time: selectedSlot.end_time,
+            reason: reason.trim() || null,
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Reschedule failed");
+      }
+
+      onSaved?.();
+      addToast("Appointment rescheduled successfully.", "success");
+      onClose();
+    } catch (err) {
+      const message = err.message || "Reschedule failed";
+      setError(message);
+      addToast(message, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open || !appointment) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-3xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <p className="text-sm font-bold text-gray-900">
+              Reschedule appointment
+            </p>
+            <p className="text-xs text-gray-500">
+              Only doctor availability and active slots are shown.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-0">
+          <div className="border-b lg:border-b-0 lg:border-r border-gray-100 bg-gray-50 p-5 space-y-4">
+            <div>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">
+                Appointment
+              </p>
+              <p className="text-sm font-extrabold text-gray-900">
+                {appointment.patient}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">{appointment.desc}</p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 mb-2">
+                New date
+              </label>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(event) => {
+                  setSelectedDate(event.target.value);
+                  setSelectedSlot(null);
+                }}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 mb-2">
+                Reason
+              </label>
+              <textarea
+                rows="4"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                placeholder="Optional reschedule reason"
+              />
+            </div>
+          </div>
+
+          <div className="p-5">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <p className="text-sm font-bold text-gray-900">
+                  Available time slots
+                </p>
+                <p className="text-xs text-gray-500">
+                  Appointment duration: {appointmentDuration} minutes
+                </p>
+              </div>
+              {(loadingSchedules || loadingSlots) && (
+                <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full">
+                  Loading schedule
+                </span>
+              )}
+            </div>
+
+            {error && (
+              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+
+            <div className="max-h-80 overflow-y-auto pr-1">
+              {availableSlots.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {availableSlots.map((slot) => {
+                    const active =
+                      selectedSlot?.start_time === slot.start_time &&
+                      selectedSlot?.end_time === slot.end_time;
+                    return (
+                      <button
+                        key={`${slot.start_time}-${slot.end_time}`}
+                        type="button"
+                        onClick={() => setSelectedSlot(slot)}
+                        className={`text-left rounded-2xl border px-4 py-3 transition ${
+                          active
+                            ? "border-emerald-500 bg-emerald-50 shadow-sm"
+                            : "border-gray-200 bg-white hover:border-emerald-200 hover:bg-emerald-50/40"
+                        }`}
+                      >
+                        <p className="text-sm font-bold text-gray-900">
+                          {slot.label}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Doctor-defined slot
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-sm text-gray-500 text-center">
+                  {selectedDate
+                    ? "No matching doctor slots are available for this date."
+                    : "Pick a date to see the doctor-defined slots."}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-5 pt-4 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!selectedSlot || submitting}
+                className={`px-4 py-2 rounded-xl text-sm font-bold text-white transition ${
+                  !selectedSlot || submitting
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-700"
+                }`}
+              >
+                {submitting ? "Saving..." : "Save reschedule"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Appointments Page ─────────────────────────────────────────────────────
 export default function DoctorAppointments() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -343,9 +780,13 @@ export default function DoctorAppointments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [doctorData, setDoctorData] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [rescheduleAppointment, setRescheduleAppointment] = useState(null);
+  const { addToast } = useNotification();
 
   const doctorId =
     localStorage.getItem("doctorId") || sessionStorage.getItem("doctorId");
+  const selectedYear = selectedDate.getFullYear();
 
   // sliding date strip
   const [stripStart, setStripStart] = useState(new Date());
@@ -370,6 +811,31 @@ export default function DoctorAppointments() {
   ];
   const today = new Date();
 
+  const getDateHighlightTone = (day) => {
+    const dateKey = format(day, "yyyy-MM-dd");
+    const dayAppointments = appointments[dateKey] || [];
+
+    if (!dayAppointments.length) return null;
+
+    const statusSet = new Set(
+      dayAppointments.map((item) => String(item.status || "").toLowerCase()),
+    );
+    const isPastDate = dateKey < format(today, "yyyy-MM-dd");
+
+    if (statusSet.has("cancelled")) return "cancelled";
+    if (statusSet.has("rescheduled")) return "rescheduled";
+    if (isPastDate) return "past";
+    if (
+      dayAppointments.some((item) =>
+        ACTIVE_APPOINTMENT_STATUSES.has(item.status),
+      )
+    ) {
+      return "active";
+    }
+
+    return "past";
+  };
+
   useEffect(() => {
     if (!doctorId) {
       setError("Doctor ID not found. Please log in again.");
@@ -377,20 +843,35 @@ export default function DoctorAppointments() {
       return;
     }
     fetchDoctorInfo();
+  }, [doctorId]);
+
+  useEffect(() => {
+    if (!doctorId) {
+      return;
+    }
+
     fetchAppointments();
-  }, [doctorId, selectedDate]);
+  }, [doctorId, selectedYear]);
 
   const fetchDoctorInfo = async () => {
     try {
       const res = await fetch(`${API_BASE}/doctors/${doctorId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setDoctorData({
-          name: `${data.data.user.first_name || "Dr."} ${data.data.user.last_name || "Medical"}`,
-          specialty: data.data.specialization?.name || "General",
-          avatar: logoImg,
-        });
-      }
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const doctor = data.data?.doctor || data.data || {};
+
+      setDoctorData({
+        user_id: doctor.user_id,
+        name: doctor.first_name
+          ? `Dr. ${doctor.first_name} ${doctor.last_name || ""}`.trim()
+          : "Doctor",
+        specialty:
+          doctor.specialization_name ||
+          doctor.specialization?.name ||
+          "General",
+        avatar: logoImg,
+      });
     } catch (err) {
       console.error("Failed to fetch doctor info:", err);
     }
@@ -401,9 +882,8 @@ export default function DoctorAppointments() {
       setLoading(true);
       setError(null);
 
-      const dateStr = format(selectedDate, "yyyy-MM-dd");
       const res = await fetch(
-        `${API_BASE}/doctors/${doctorId}/appointments?date=${dateStr}&page=1&limit=100`,
+        `${API_BASE}/doctors/${doctorId}/appointments?year=${selectedYear}&page=1&limit=1000`,
       );
 
       if (!res.ok) throw new Error("Failed to fetch appointments");
@@ -412,7 +892,8 @@ export default function DoctorAppointments() {
       const apptsByDate = {};
 
       (data.data?.items || []).forEach((appt) => {
-        const date = appt.appointment_date;
+        const date = toDateKey(appt.appointment_date);
+        if (!date) return;
         if (!apptsByDate[date]) apptsByDate[date] = [];
         const hour = parseInt(appt.start_time.split(":")[0]);
         apptsByDate[date].push({
@@ -423,6 +904,7 @@ export default function DoctorAppointments() {
           desc: appt.reason || "Appointment",
           start_time: appt.start_time,
           end_time: appt.end_time,
+          status: appt.status,
         });
       });
 
@@ -433,6 +915,62 @@ export default function DoctorAppointments() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshAppointments = async () => {
+    await fetchAppointments();
+  };
+
+  const runAppointmentAction = async (appointment, action) => {
+    if (!doctorId || !appointment) return;
+
+    try {
+      setActionLoading(true);
+      const res = await fetch(
+        `${API_BASE}/doctors/${doctorId}/appointments/${appointment.id}/${action}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `Unable to ${action} appointment`);
+      }
+
+      await refreshAppointments();
+      setRescheduleAppointment((current) =>
+        current?.id === appointment.id ? null : current,
+      );
+
+      const successMessage =
+        action === "cancel"
+          ? "Appointment cancelled successfully."
+          : action === "complete"
+            ? "Appointment marked as completed."
+            : "Appointment updated successfully.";
+      addToast(successMessage, "success");
+    } catch (err) {
+      const message = err.message || `Unable to ${action} appointment`;
+      setError(message);
+      addToast(message, "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancelAppointment = async (appointment) => {
+    addToast("Cancelling appointment...", "warning");
+    await runAppointmentAction(appointment, "cancel");
+  };
+
+  const handleCompleteAppointment = async (appointment) => {
+    await runAppointmentAction(appointment, "complete");
+  };
+
+  const handleOpenReschedule = (appointment) => {
+    setRescheduleAppointment(appointment);
   };
 
   const dateKey = format(selectedDate, "yyyy-MM-dd");
@@ -472,12 +1010,7 @@ export default function DoctorAppointments() {
         </div>
       )}
 
-      <Sidebar
-        open={sidebarOpen}
-        setOpen={setSidebarOpen}
-        activePath="/appointments"
-        doctorData={doctorData}
-      />
+      <DoctorSidebar />
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
@@ -496,10 +1029,7 @@ export default function DoctorAppointments() {
             <span className="text-sm text-gray-400 font-medium">
               {format(today, "EEE, MMM d")}
             </span>
-            <button className="relative w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-100 transition text-gray-500">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            </button>
+            <NotificationBell userId={doctorData?.user_id} />
           </div>
         </header>
 
@@ -569,7 +1099,16 @@ export default function DoctorAppointments() {
                   {stripDays.map((day, i) => {
                     const isSel = isSameDay(day, selectedDate);
                     const isTod = isToday(day);
-                    const hasA = !!appointments[format(day, "yyyy-MM-dd")];
+                    const tone = getDateHighlightTone(day);
+                    const dayClasses = {
+                      active:
+                        "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200",
+                      past: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
+                      rescheduled:
+                        "bg-amber-100 text-amber-700 ring-1 ring-amber-200",
+                      cancelled:
+                        "bg-rose-100 text-rose-700 ring-1 ring-rose-200",
+                    };
                     return (
                       <button
                         key={i}
@@ -583,17 +1122,25 @@ export default function DoctorAppointments() {
                           className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-extrabold transition-all ${
                             isSel
                               ? "bg-[#51C833] text-white shadow-md"
-                              : isTod
-                                ? "bg-emerald-100 text-[#51C833]"
-                                : "text-gray-600 hover:bg-[#DFF2EB]"
+                              : tone
+                                ? dayClasses[tone]
+                                : isTod
+                                  ? "bg-emerald-100 text-[#51C833]"
+                                  : "text-gray-600 hover:bg-[#DFF2EB]"
                           }`}
                         >
                           {format(day, "d")}
                         </span>
-                        {hasA && (
+                        {tone && !isSel && (
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              isSel ? "bg-[#51C833]" : "bg-[#51C833]"
+                              tone === "cancelled"
+                                ? "bg-rose-500"
+                                : tone === "rescheduled"
+                                  ? "bg-amber-500"
+                                  : tone === "past"
+                                    ? "bg-slate-500"
+                                    : "bg-emerald-500"
                             }`}
                           />
                         )}
@@ -616,6 +1163,9 @@ export default function DoctorAppointments() {
               <TimeSchedule
                 selectedDate={selectedDate}
                 appointments={appointments}
+                onCancel={handleCancelAppointment}
+                onComplete={handleCompleteAppointment}
+                onReschedule={handleOpenReschedule}
               />
             </div>
           </div>
@@ -630,6 +1180,14 @@ export default function DoctorAppointments() {
           </div>
         </div>
       </div>
+
+      <DoctorRescheduleModal
+        open={Boolean(rescheduleAppointment)}
+        doctorId={doctorId}
+        appointment={rescheduleAppointment}
+        onClose={() => setRescheduleAppointment(null)}
+        onSaved={refreshAppointments}
+      />
     </div>
   );
 }

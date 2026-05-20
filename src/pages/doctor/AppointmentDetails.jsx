@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
+import DoctorSidebar from "../../components/DoctorSidebar";
+import { NotificationBell } from "../../components/NotificationBell";
 import {
   LayoutDashboard,
   CalendarDays,
   Users,
-  ClipboardList,
+  Settings,
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -14,31 +16,24 @@ import {
   AlertCircle,
   Save,
   Info,
-  X,
-  Stethoscope,
   Tag,
   Calendar,
   Repeat,
   PanelLeftClose,
   PanelLeftOpen,
-  Loader,
+  UserRound,
 } from "lucide-react";
-import logo from "../../assets/logoimage.png";
-import logoShort from "../../assets/logo.png";
+import logoImg from "../../assets/logoimage.png";
+import { useNotification } from "../../context/useNotification";
 
-// ── API BASE URL ──────────────────────────────────────────────────────────────
 const API_BASE = "http://localhost:3000/api";
 
-/* ─────────────────────── nav items ─────────────────────── */
 const NAV_ITEMS = [
   { label: "Dashboard", Icon: LayoutDashboard, to: "/doctor/dashboard" },
-  { label: "Appointment Setup", Icon: CalendarDays, to: "/doctor/setup" },
   { label: "Patients", Icon: Users, to: "/doctor/patients" },
-  {
-    label: "Appointment Details",
-    Icon: ClipboardList,
-    to: "/doctor/appointments",
-  },
+  { label: "Appointments", Icon: CalendarDays, to: "/doctor/appointments" },
+  { label: "Schedule Setup", Icon: Settings, to: "/doctor/schedule" },
+  { label: "Profile", Icon: UserRound, to: "/doctor/profile" },
 ];
 
 const WEEKDAYS_FULL = [
@@ -58,11 +53,13 @@ const newSlot = () => ({
   start: "09:00",
   end: "17:00",
   maxPatients: 10,
+  slotDuration: 30,
+  isNew: true, // Track newly added slots vs existing from DB
 });
 
 const fmtTime = (t) => {
   if (!t) return "";
-  const [h, m] = t.split(":").map(Number);
+  const [h, m] = t.slice(0, 5).split(":").map(Number);
   const ampm = h >= 12 ? "PM" : "AM";
   const hr = h % 12 || 12;
   return `${hr}:${String(m).padStart(2, "0")} ${ampm}`;
@@ -90,24 +87,14 @@ const isSameDay = (a, b) =>
 
 /* ═══════════════════════════════════════════════════════ */
 export default function AppointmentSetup() {
-  const location = useLocation();
-
-  /* ── sidebar collapsed state ── */
+  const [doctorData, setDoctorData] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  /* ── mode: "day" | "date" ── */
-  const [mode, setMode] = useState("day");
-
-  /* ── calendar ── */
+  const [mode, setMode] = useState("day"); // "day" | "date"
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedDays, setSelectedDays] = useState([]);
-
-  /* ── schedules ── */
-  const [daySchedules, setDaySchedules] = useState({});
-  const [dateSchedules, setDateSchedules] = useState({});
-
-  /* ── ui state ── */
+  const [daySchedules, setDaySchedules] = useState({}); // { "0": [...slots], ... }
+  const [dateSchedules, setDateSchedules] = useState({}); // { "2025-06-01": [...slots], ... }
   const [saved, setSaved] = useState(false);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -115,37 +102,98 @@ export default function AppointmentSetup() {
 
   const doctorId =
     localStorage.getItem("doctorId") || sessionStorage.getItem("doctorId");
+  const { addToast } = useNotification();
 
-  /* ── Initialize data on mount ── */
+  /* ── fetch doctor info ── */
   useEffect(() => {
-    if (doctorId) {
-      fetchExistingSchedules();
-    }
+    if (!doctorId) return;
+    fetch(`${API_BASE}/doctors/${doctorId}/panel`)
+      .then((r) => r.json())
+      .then((d) => setDoctorData(d.data?.doctor || null))
+      .catch(console.error);
+  }, [doctorId]);
+
+  /* ── fetch existing schedules on mount ── */
+  useEffect(() => {
+    if (doctorId) fetchExistingSchedules();
   }, [doctorId]);
 
   const fetchExistingSchedules = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/doctors/${doctorId}/schedules`);
+      // Use /all-schedules to get every schedule row (both day and date types)
+      const res = await fetch(`${API_BASE}/doctors/${doctorId}/all-schedules`);
       if (!res.ok) throw new Error("Failed to fetch schedules");
-
       const data = await res.json();
-      // Parse existing schedules from API if needed
-      setLoading(false);
+      const schedules = data.data?.items || [];
+
+      const newDay = {};
+      const newDate = {};
+
+      // Deduplicate: only keep unique (day_of_week/specific_date, start_time, end_time) combinations
+      const seenDaySchedules = new Set();
+      const seenDateSchedules = new Set();
+
+      schedules.forEach((s) => {
+        if (s.schedule_type === "date" && s.specific_date) {
+          const iso = s.specific_date.slice(0, 10);
+          const key = `${iso}-${s.start_time}-${s.end_time}`;
+          if (seenDateSchedules.has(key)) return; // Skip duplicate
+          seenDateSchedules.add(key);
+
+          if (!newDate[iso]) newDate[iso] = [];
+          newDate[iso].push({
+            id: s.id,
+            start: s.start_time.slice(0, 5),
+            end: s.end_time.slice(0, 5),
+            maxPatients: s.max_patients_per_slot,
+            slotDuration: s.slot_duration_minutes,
+            isNew: false, // Mark as from DB
+          });
+        } else if (s.day_of_week !== null && s.day_of_week !== undefined) {
+          const dow = s.day_of_week.toString();
+          const key = `${dow}-${s.start_time}-${s.end_time}`;
+          if (seenDaySchedules.has(key)) return; // Skip duplicate
+          seenDaySchedules.add(key);
+
+          if (!newDay[dow]) newDay[dow] = [];
+          newDay[dow].push({
+            id: s.id,
+            start: s.start_time.slice(0, 5),
+            end: s.end_time.slice(0, 5),
+            maxPatients: s.max_patients_per_slot,
+            slotDuration: s.slot_duration_minutes,
+            isNew: false, // Mark as from DB
+          });
+        }
+      });
+
+      setDaySchedules(newDay);
+      setDateSchedules(newDate);
     } catch (err) {
       console.error("Error fetching schedules:", err);
+      addToast("Failed to load existing schedules", "error");
+    } finally {
       setLoading(false);
     }
   };
 
+  /* ── save ── */
   const saveSchedules = async () => {
     try {
       setLoading(true);
       setSaveError(null);
 
-      // Save day schedules
+      let dayCount = 0;
+      let dateCount = 0;
+      const errors = [];
+
+      // ── Save day-of-week schedules (only NEW ones) ──
       for (const [day, slots] of Object.entries(daySchedules)) {
         for (const slot of slots) {
+          // Only save NEW slots, not ones already in the database
+          if (!slot.isNew) continue;
+
           const res = await fetch(
             `${API_BASE}/doctors/${doctorId}/availability`,
             {
@@ -157,17 +205,27 @@ export default function AppointmentSetup() {
                 start_time: slot.start,
                 end_time: slot.end,
                 max_patients: slot.maxPatients,
-                slot_duration_minutes: 30,
+                slot_duration_minutes: slot.slotDuration || 30,
               }),
             },
           );
-          if (!res.ok) throw new Error("Failed to save day schedule");
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            errors.push(
+              `Day ${WEEKDAYS_FULL[day]}: ${err.message || "save failed"}`,
+            );
+          } else {
+            dayCount++;
+          }
         }
       }
 
-      // Save date-specific schedules
-      for (const [dateKey, slots] of Object.entries(dateSchedules)) {
+      // ── Save date-specific overrides (only NEW ones) ──
+      for (const [iso, slots] of Object.entries(dateSchedules)) {
         for (const slot of slots) {
+          // Only save NEW slots, not ones already in the database
+          if (!slot.isNew) continue;
+
           const res = await fetch(
             `${API_BASE}/doctors/${doctorId}/availability`,
             {
@@ -175,29 +233,46 @@ export default function AppointmentSetup() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 type: "date",
-                specific_date: dateKey,
+                specific_date: iso,
                 start_time: slot.start,
                 end_time: slot.end,
                 max_patients: slot.maxPatients,
-                slot_duration_minutes: 30,
+                slot_duration_minutes: slot.slotDuration || 30,
               }),
             },
           );
-          if (!res.ok) throw new Error("Failed to save date schedule");
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            errors.push(`Date ${iso}: ${err.message || "save failed"}`);
+          } else {
+            dateCount++;
+          }
         }
       }
 
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-      setLoading(false);
+      if (errors.length > 0) {
+        addToast(`Some schedules failed:\n${errors.join("\n")}`, "error");
+      } else {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+        addToast(
+          `Saved ${dayCount} day schedule(s) and ${dateCount} date override(s)!`,
+          "success",
+        );
+      }
+
+      // Refresh to get server-assigned IDs
+      await fetchExistingSchedules();
     } catch (err) {
       console.error("Error saving schedules:", err);
       setSaveError(err.message);
+      addToast("Failed to save schedules: " + err.message, "error");
+    } finally {
       setLoading(false);
     }
   };
 
-  /* ─── calendar grid ─── */
+  /* ── calendar grid ── */
   const { weeks, monthLabel } = useMemo(() => {
     const y = currentMonth.getFullYear();
     const m = currentMonth.getMonth();
@@ -225,7 +300,7 @@ export default function AppointmentSetup() {
     };
   }, [currentMonth]);
 
-  /* ─── slot helpers ─── */
+  /* ── slot helpers ── */
   const getSlotsFor = (key, isDay) =>
     (isDay ? daySchedules : dateSchedules)[key] || [];
   const setSlotsFor = (key, isDay, slots) => {
@@ -240,16 +315,14 @@ export default function AppointmentSetup() {
       isDay,
       getSlotsFor(key, isDay).filter((s) => s.id !== id),
     );
-  const updateSlot = (key, isDay, id, field, value) =>
+  const updateSlot = (key, isDay, id, f, v) =>
     setSlotsFor(
       key,
       isDay,
-      getSlotsFor(key, isDay).map((s) =>
-        s.id === id ? { ...s, [field]: value } : s,
-      ),
+      getSlotsFor(key, isDay).map((s) => (s.id === id ? { ...s, [f]: v } : s)),
     );
 
-  /* ─── active key ─── */
+  /* ── active key ── */
   const activeKey =
     mode === "day"
       ? selectedDays.length === 1
@@ -261,43 +334,46 @@ export default function AppointmentSetup() {
   const activeSlots =
     activeKey != null ? getSlotsFor(activeKey, mode === "day") : [];
 
-  /* ─── toggle day / date click ─── */
+  /* ── toggle day / date click ── */
   const toggleDay = (dow) => {
     setSelectedDays((prev) =>
       prev.includes(dow) ? prev.filter((d) => d !== dow) : [...prev, dow],
     );
     setSelectedDate(null);
   };
+
+  const switchDay = (dow) => {
+    // When clicking calendar in day mode: REPLACE selection instead of toggle
+    setSelectedDays([dow]);
+    setSelectedDate(null);
+  };
+
   const handleDateClick = (cellDate) => {
-    if (mode === "day") toggleDay(cellDate.getDay());
+    if (mode === "day") switchDay(cellDate.getDay());
     else {
       setSelectedDate(cellDate);
       setSelectedDays([]);
     }
   };
 
-  /* ─── validate & save ─── */
+  /* ── validate ── */
   const validate = () => {
     const errs = {};
-    const checkSlots = (slots, key) =>
+    const check = (slots, key) =>
       slots.forEach((s, i) => {
         if (s.start >= s.end)
           errs[`${key}-${i}`] = "End time must be after start time";
       });
-    Object.entries(daySchedules).forEach(([k, v]) => checkSlots(v, `day-${k}`));
-    Object.entries(dateSchedules).forEach(([k, v]) =>
-      checkSlots(v, `date-${k}`),
-    );
+    Object.entries(daySchedules).forEach(([k, v]) => check(v, `day-${k}`));
+    Object.entries(dateSchedules).forEach(([k, v]) => check(v, `date-${k}`));
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
   const handleSave = async () => {
-    if (!validate()) return;
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    if (validate()) await saveSchedules();
   };
 
-  /* ─── summary ─── */
+  /* ── summary ── */
   const configuredDays = Object.entries(daySchedules).filter(
     ([, v]) => v.length > 0,
   );
@@ -305,7 +381,7 @@ export default function AppointmentSetup() {
     ([, v]) => v.length > 0,
   );
 
-  /* ─── cell highlight ─── */
+  /* ── cell highlight ── */
   const getCellHighlight = (cell) => {
     if (!cell.cur) return null;
     const y = currentMonth.getFullYear();
@@ -327,209 +403,94 @@ export default function AppointmentSetup() {
   /* ════════════ render ════════════ */
   return (
     <div
-      className="h-screen flex overflow-hidden bg-gray-50"
-      style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
+      className="h-screen flex overflow-hidden bg-[#DFF2EB]"
+      style={{ fontFamily: "'Nunito', sans-serif" }}
     >
-      {/* ══════════ SIDE NAVBAR ══════════ */}
-      <aside
-        className="shrink-0 bg-white border-r border-gray-100 h-screen flex flex-col shadow-sm transition-all duration-300 ease-in-out overflow-hidden"
-        style={{ width: sidebarOpen ? "256px" : "64px" }}
-      >
-        {/* Brand row */}
-        <div
-          className={`flex items-center h-[65px] border-b border-gray-50 px-4 shrink-0 ${sidebarOpen ? "gap-2.5 justify-between" : "justify-center"}`}
-        >
-          {sidebarOpen && (
-            <div className="flex items-center gap-2.5 min-w-0">
-              {/* <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center shadow-md shadow-emerald-200 shrink-0">
-                <Stethoscope className="w-4 h-4 text-white" strokeWidth={2.5} />
-              </div>
-               */}
-              <img src={logo} alt="" />
-            </div>
-          )}
-          {!sidebarOpen && (
-            <img
-              src={logoShort}
-              alt=""
-              onClick={() => setSidebarOpen(true)}
-              className="cursor-pointer"
-            />
-          )}
-          {/* Toggle button — only show when open; collapsed version is in the header */}
-          {sidebarOpen && (
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
-            >
-              <PanelLeftClose className="w-4 h-4" strokeWidth={2} />
-            </button>
-          )}
-        </div>
+      <DoctorSidebar />
 
-        {/* Nav links */}
-        <nav className="flex-1 px-2 py-5 space-y-0.5 overflow-y-auto overflow-x-hidden">
-          {NAV_ITEMS.map(({ label, Icon, to }) => {
-            const active = location.pathname === to;
-            return (
-              <Link
-                key={to}
-                to={to}
-                title={!sidebarOpen ? label : undefined}
-                className={`flex items-center gap-3 rounded-xl transition-all duration-150 group relative ${
-                  sidebarOpen ? "px-4 py-2.5" : "px-0 py-2.5 justify-center"
-                } ${
-                  active
-                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm"
-                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
-                }`}
-              >
-                <Icon
-                  className={`shrink-0 transition-all ${
-                    sidebarOpen ? "w-4 h-4" : "w-5 h-5"
-                  } ${active ? "text-emerald-600" : "text-gray-400 group-hover:text-gray-600"}`}
-                  strokeWidth={active ? 2.5 : 2}
-                />
-                {sidebarOpen && (
-                  <span className="text-sm font-medium truncate">{label}</span>
-                )}
-                {sidebarOpen && active && (
-                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                )}
-                {/* Tooltip when collapsed */}
-                {!sidebarOpen && (
-                  <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-gray-800 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-lg">
-                    {label}
-                  </div>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Doctor info */}
-        {sidebarOpen && (
-          <div className="px-4 pb-5 shrink-0">
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
-              <img
-                src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=80&h=80&fit=crop&crop=face"
-                alt="doctor"
-                className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100 shrink-0"
-              />
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-800 truncate">
-                  Dr. Priya Sharma
-                </p>
-                <p className="text-[10px] text-emerald-600 font-medium">
-                  Cardiologist
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-        {!sidebarOpen && (
-          <div className="px-2 pb-5 shrink-0 flex justify-center">
-            <img
-              src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=80&h=80&fit=crop&crop=face"
-              alt="doctor"
-              className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100"
-            />
-          </div>
-        )}
-      </aside>
-
-      {/* ══════════ MAIN ══════════ */}
-      <main className="flex-1 h-screen overflow-y-auto flex flex-col min-w-0 bg-gradient-to-t from-emerald-200 to-emerald-50">
-        {/* Page header */}
-        <header className="bg-emerald-0  px-6 py-4 flex items-center justify-between sticky top-0 z-20 gap-4">
-          <div className="flex items-center gap-3">
-            {/* Expand button — shown when sidebar is collapsed */}
-            {/* {!sidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
-              >
-                <PanelLeftOpen className="w-4 h-4" strokeWidth={2} />
-              </button>
-            )} */}
-            <div>
-              <h1 className="text-lg font-bold text-gray-800">
-                Appointment Setup
-              </h1>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Configure your availability schedule
-              </p>
-            </div>
+      <main className="flex-1 h-screen overflow-y-auto flex flex-col min-w-0 bg-[#DFF2EB]">
+        {/* Header */}
+        <header className="px-6 py-4 flex items-center justify-between sticky top-0 z-20 gap-4">
+          <div>
+            <h1 className="text-lg font-bold text-gray-800">
+              Appointment Setup
+            </h1>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Configure your availability schedule
+            </p>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationBell userId={doctorData?.user_id} />
             {saved && (
               <div className="flex items-center gap-1.5 text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2">
                 <Check className="w-4 h-4" strokeWidth={2.5} />
                 Schedule saved
               </div>
             )}
+            {saveError && (
+              <div className="flex items-center gap-1.5 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2">
+                <AlertCircle className="w-4 h-4" strokeWidth={2} />
+                {saveError}
+              </div>
+            )}
             <button
               onClick={handleSave}
-              className="flex items-center gap-2 bg-emerald-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl hover:bg-emerald-600 shadow-md shadow-emerald-100 transition"
+              disabled={loading}
+              className="flex items-center gap-2 bg-emerald-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl hover:bg-emerald-600 shadow-md shadow-emerald-100 transition disabled:opacity-60"
             >
               <Save className="w-4 h-4" strokeWidth={2.5} />
-              Save Schedule
+              {loading ? "Saving…" : "Save Schedule"}
             </button>
           </div>
         </header>
 
-        {/* ── Body ── */}
+        {/* Body */}
         <div className="p-6 flex-1">
-          {/* 60 / 40 split */}
           <div className="flex gap-5 h-full items-start">
-            {/* ══ LEFT 60% ══ */}
+            {/* ══ LEFT ══ */}
             <div className="flex flex-col gap-4" style={{ flex: "0 0 40%" }}>
               {/* Mode toggle */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-1.5 flex gap-1.5">
-                <button
-                  onClick={() => {
-                    setMode("day");
-                    setSelectedDate(null);
-                  }}
-                  className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
-                    mode === "day"
-                      ? "bg-emerald-500 text-white shadow-md shadow-emerald-100"
-                      : "text-gray-500 hover:bg-gray-50"
-                  }`}
-                >
-                  <Repeat
-                    className={`w-4 h-4 ${mode === "day" ? "text-white" : "text-gray-400"}`}
-                    strokeWidth={2}
-                  />
-                  By Weekday
-                  {mode === "day" && (
-                    <span className="ml-1 bg-white/25 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                      RECURRING
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    setMode("date");
-                    setSelectedDays([]);
-                  }}
-                  className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
-                    mode === "date"
-                      ? "bg-emerald-500 text-white shadow-md shadow-emerald-100"
-                      : "text-gray-500 hover:bg-gray-50"
-                  }`}
-                >
-                  <Tag
-                    className={`w-4 h-4 ${mode === "date" ? "text-white" : "text-gray-400"}`}
-                    strokeWidth={2}
-                  />
-                  By Date
-                  {mode === "date" && (
-                    <span className="ml-1 bg-white/25 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                      OVERRIDE
-                    </span>
-                  )}
-                </button>
+                {[
+                  {
+                    key: "day",
+                    Icon: Repeat,
+                    label: "By Weekday",
+                    badge: "RECURRING",
+                  },
+                  {
+                    key: "date",
+                    Icon: Tag,
+                    label: "By Date",
+                    badge: "OVERRIDE",
+                  },
+                ].map(({ key, Icon, label, badge }) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setMode(key);
+                      key === "day"
+                        ? setSelectedDate(null)
+                        : setSelectedDays([]);
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
+                      mode === key
+                        ? "bg-emerald-500 text-white shadow-md shadow-emerald-100"
+                        : "text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    <Icon
+                      className={`w-4 h-4 ${mode === key ? "text-white" : "text-gray-400"}`}
+                      strokeWidth={2}
+                    />
+                    {label}
+                    {mode === key && (
+                      <span className="ml-1 bg-white/25 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                        {badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
 
               {/* Mode hint */}
@@ -581,7 +542,6 @@ export default function AppointmentSetup() {
 
               {/* Calendar */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                {/* Month header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
                   <button
                     onClick={() =>
@@ -608,7 +568,6 @@ export default function AppointmentSetup() {
                   </button>
                 </div>
 
-                {/* Weekday headers */}
                 <div className="grid grid-cols-7 px-3 pt-3 pb-1">
                   {WEEKDAYS_SHORT.map((d) => (
                     <div
@@ -620,10 +579,9 @@ export default function AppointmentSetup() {
                   ))}
                 </div>
 
-                {/* Day cells */}
-                <div className="px-3 pb-4 space-y-1 text-">
+                <div className="px-3 pb-4 space-y-1">
                   {weeks.map((week, wi) => (
-                    <div key={wi} className="grid grid-cols-7 gap-1 ">
+                    <div key={wi} className="grid grid-cols-7 gap-1">
                       {week.map((cell, ci) => {
                         const y = currentMonth.getFullYear();
                         const m = currentMonth.getMonth();
@@ -637,7 +595,6 @@ export default function AppointmentSetup() {
                         const isToday =
                           cell.cur && isSameDay(cellDate, new Date());
 
-                        // Build cell classes — rounded-xl rectangles matching quick-select style
                         let cellCls =
                           "relative h-9 flex items-center justify-center rounded-xl text-[16px] font-semibold transition-all ";
                         let numCls = "";
@@ -661,8 +618,7 @@ export default function AppointmentSetup() {
                             "bg-emerald-50 border border-emerald-200 cursor-pointer hover:bg-emerald-100";
                           numCls = "text-emerald-700 font-bold";
                         } else {
-                          // No schedule set — gray numbers, no colored background
-                          cellCls += "cursor-pointer hover:bg-gray-100 ";
+                          cellCls += "cursor-pointer hover:bg-gray-100";
                           numCls = "text-gray-400";
                         }
 
@@ -691,8 +647,7 @@ export default function AppointmentSetup() {
                   ))}
                 </div>
 
-                {/* Legend */}
-                <div className="border-t border-gray-50 px-5 py-3 flex items-center gap-5 flex-wrap ">
+                <div className="border-t border-gray-50 px-5 py-3 flex items-center gap-5 flex-wrap">
                   <LegendChip
                     color="bg-emerald-50 border border-emerald-200 text-emerald-700"
                     label="Weekday set"
@@ -760,7 +715,7 @@ export default function AppointmentSetup() {
               )}
             </div>
 
-            {/* ══ RIGHT 40% ══ */}
+            {/* ══ RIGHT ══ */}
             <div
               className="flex flex-col gap-4 min-w-0"
               style={{ flex: "0 0 60%" }}
@@ -947,8 +902,8 @@ export default function AppointmentSetup() {
                                 slot={slot}
                                 idx={idx}
                                 compact
-                                onUpdate={(field, value) =>
-                                  updateSlot(dow, true, slot.id, field, value)
+                                onUpdate={(f, v) =>
+                                  updateSlot(dow, true, slot.id, f, v)
                                 }
                                 onRemove={() => removeSlot(dow, true, slot.id)}
                               />
@@ -1091,7 +1046,7 @@ function SlotRow({ slot, idx, onUpdate, onRemove, error, compact }) {
   );
 }
 
-/* ─── Legend chip (rectangle style) ─── */
+/* ─── Legend chip ─── */
 function LegendChip({ color, label }) {
   return (
     <div className="flex items-center gap-1.5">
@@ -1099,5 +1054,100 @@ function LegendChip({ color, label }) {
         {label}
       </span>
     </div>
+  );
+}
+
+/* ─── Sidebar ─── */
+function Sidebar({ open, setOpen, activePath, doctorData }) {
+  return (
+    <aside
+      className="shrink-0 bg-white border-r border-gray-100 h-screen flex flex-col shadow-sm transition-all duration-300 overflow-hidden"
+      style={{ width: open ? "260px" : "60px" }}
+    >
+      <div
+        className={`flex items-center h-16 border-b border-gray-50 px-4 shrink-0 ${open ? "justify-between" : "justify-center"}`}
+      >
+        {open && (
+          <img src={logoImg} alt="Logo" className="h-10 md:h-[3.8rem]" />
+        )}
+        <button
+          onClick={() => setOpen(!open)}
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
+        >
+          {open ? (
+            <PanelLeftClose className="w-4 h-4" />
+          ) : (
+            <PanelLeftOpen className="w-4 h-4" />
+          )}
+        </button>
+      </div>
+
+      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+        {NAV_ITEMS.map(({ label, Icon, to }) => {
+          const active = activePath === to;
+          return (
+            <a
+              key={to}
+              href={to}
+              title={!open ? label : undefined}
+              className={`flex items-center gap-3 rounded-xl transition-all duration-150 group relative ${
+                open ? "px-3 py-2.5" : "px-0 py-2.5 justify-center"
+              } ${active ? "bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm" : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"}`}
+            >
+              <Icon
+                className={`shrink-0 ${open ? "w-4 h-4" : "w-5 h-5"} ${active ? "text-emerald-600" : "text-gray-400 group-hover:text-gray-600"}`}
+                strokeWidth={active ? 2.5 : 2}
+              />
+              {open && (
+                <span className="text-sm font-semibold truncate">{label}</span>
+              )}
+              {open && active && (
+                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+              )}
+              {!open && (
+                <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-gray-800 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-lg">
+                  {label}
+                </div>
+              )}
+            </a>
+          );
+        })}
+      </nav>
+
+      {open ? (
+        <div className="px-3 pb-4 shrink-0">
+          <Link
+            to="/doctor/profile"
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 hover:bg-gray-100 transition"
+          >
+            <img
+              src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=200&h=200&fit=crop&crop=face"
+              alt="doctor"
+              className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100 shrink-0"
+            />
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-gray-800 truncate">
+                {doctorData?.first_name && doctorData?.last_name
+                  ? `Dr. ${doctorData.first_name} ${doctorData.last_name}`
+                  : "Doctor"}
+              </p>
+              <p className="text-[10px] text-emerald-600 font-medium">
+                {doctorData?.specialization_name || "Specialist"}
+              </p>
+            </div>
+          </Link>
+        </div>
+      ) : (
+        <div className="px-2 pb-4 shrink-0 flex justify-center">
+          <Link to="/doctor/profile" title="Open profile">
+            <img
+              src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=200&h=200&fit=crop&crop=face"
+              alt="doctor"
+              className="w-8 h-8 rounded-xl object-cover ring-1 ring-emerald-100"
+            />
+          </Link>
+        </div>
+      )}
+    </aside>
   );
 }
