@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import MiniCalendar from "../components/MiniCalendar";
+import { doctorData } from "../data/doctors";
 
 const defaultDoctor = {
   id: 1,
@@ -145,12 +146,42 @@ const mapDoctorApiToViewModel = (doctorApi = {}, schedules = []) => {
 function DoctorProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [doctor, setDoctor] = useState(defaultDoctor);
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const doctorId = Number(id);
+
+    // If a doctor object was passed through navigation state, use it immediately
+    // (this prevents id collisions between different doctor data sources)
+    const passedDoctor = location?.state?.doctor || null;
+    if (passedDoctor) {
+      // Map local doctor shape to the API view model expected by the page
+      const localDoctorPayload = {
+        id: passedDoctor.id,
+        first_name: passedDoctor.name ? passedDoctor.name.replace(/^Dr\.\s*/i, '').split(' ')[0] : undefined,
+        last_name: passedDoctor.name ? passedDoctor.name.replace(/^Dr\.\s*/i, '').split(' ').slice(1).join(' ') : undefined,
+        specialization_name: passedDoctor.specialty,
+        consultation_fee: passedDoctor.consultationFee || passedDoctor.consultation_fee,
+        average_rating: passedDoctor.rating,
+        total_reviews: passedDoctor.reviews,
+        bio: passedDoctor.about || undefined,
+        hospitals: [
+          {
+            name: passedDoctor.hospital,
+            address_line1: passedDoctor.location || passedDoctor.hospital,
+            city: passedDoctor.location || passedDoctor.hospital,
+            is_primary: true,
+          },
+        ],
+      };
+      const mappedDoctor = mapDoctorApiToViewModel(localDoctorPayload, []);
+      setDoctor(mappedDoctor);
+      setLoading(false);
+      return;
+    }
 
     if (!Number.isInteger(doctorId) || doctorId <= 0) {
       setLoading(false);
@@ -166,22 +197,52 @@ function DoctorProfile() {
           axios.get(`http://localhost:3000/api/doctors/${doctorId}/schedules`),
         ]);
 
-        if (doctorResult.status === "fulfilled") {
-          const doctorPayload = doctorResult.value?.data?.data || {};
-          const schedulePayload =
-            schedulesResult.status === "fulfilled"
-              ? schedulesResult.value?.data?.data?.schedules || []
-              : [];
-          const mappedDoctor = mapDoctorApiToViewModel(
-            doctorPayload,
-            schedulePayload,
-          );
+        let doctorPayload = {};
+        let schedulePayload = [];
 
-          if (isMounted) {
-            setDoctor(mappedDoctor);
-          }
+        if (doctorResult.status === "fulfilled") {
+          doctorPayload = doctorResult.value?.data?.data || {};
         } else {
           console.error("Error fetching doctor profile:", doctorResult.reason);
+          const fallbackDoctor = doctorData.find(
+            (doc) => Number(doc.id) === doctorId,
+          );
+          if (fallbackDoctor) {
+            doctorPayload = {
+              id: fallbackDoctor.id,
+              first_name: fallbackDoctor.first_name,
+              last_name: fallbackDoctor.last_name,
+              specialization_name: fallbackDoctor.specialization_name,
+              license_number: fallbackDoctor.license_number,
+              years_of_experience: fallbackDoctor.years_of_experience,
+              consultation_fee: fallbackDoctor.consultation_fee,
+              bio: fallbackDoctor.bio,
+              average_rating: fallbackDoctor.average_rating,
+              total_reviews: fallbackDoctor.total_reviews,
+              email: `doctor${fallbackDoctor.id}@swasthasewa.com`,
+              hospitals: [
+                {
+                  name: fallbackDoctor.hospital,
+                  address_line1: fallbackDoctor.location,
+                  city: fallbackDoctor.location,
+                  is_primary: true,
+                },
+              ],
+            };
+          }
+        }
+
+        if (schedulesResult.status === "fulfilled") {
+          schedulePayload = schedulesResult.value?.data?.data?.schedules || [];
+        } else {
+          console.error("Error fetching doctor schedules:", schedulesResult.reason);
+          schedulePayload = [];
+        }
+
+        const mappedDoctor = mapDoctorApiToViewModel(doctorPayload, schedulePayload);
+        if (isMounted) {
+          setDoctor(mappedDoctor);
+          setSchedules(Array.isArray(schedulePayload) ? schedulePayload : []);
         }
 
         if (schedulesResult.status === "fulfilled") {

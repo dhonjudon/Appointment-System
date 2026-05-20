@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -56,6 +56,14 @@ const VISIT_TYPES = [
   { label: "Other", Icon: MoreHorizontal },
 ];
 
+const PAYMENT_METHOD_LABELS = {
+  khalti: "Khalti",
+  esewa: "eSewa",
+  card: "Card",
+  bank: "Online Banking",
+  cash: "Cash on Visitation",
+};
+
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /* ─────────────── mock doctor ─────────────── */
@@ -88,7 +96,9 @@ const isPast = (year, month, day) => {
 /* ═══════════════════════════════════════════ */
 export default function BookAppointment() {
   const navigate = useNavigate();
-  const doctor = MOCK_DOCTOR; // replace with useLocation().state?.doctor
+  const location = useLocation();
+  const bookingState = location.state?.bookingState;
+  const doctor = bookingState?.doctor || location.state?.doctor || MOCK_DOCTOR;
 
   const [currentStep, setCurrentStep] = useState(1);
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -96,13 +106,30 @@ export default function BookAppointment() {
   const [selectedTime, setSelectedTime] = useState(null);
   const [visitType, setVisitType] = useState("");
   const [description, setDescription] = useState("");
-  const [payMethod, setPayMethod] = useState("card");
-  const [cardName, setCardName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [cvv, setCvv] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  React.useEffect(() => {
+    if (!bookingState) return;
+
+    if (bookingState.selectedDate) {
+      const date = new Date(bookingState.selectedDate);
+      setSelectedDate(date);
+      setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+    }
+    if (bookingState.selectedTime) {
+      setSelectedTime(bookingState.selectedTime);
+    }
+    if (bookingState.visitType) {
+      setVisitType(bookingState.visitType);
+    }
+    if (bookingState.description) {
+      setDescription(bookingState.description);
+    }
+    if (bookingState.restoreStep) {
+      setCurrentStep(bookingState.restoreStep);
+    }
+  }, [bookingState]);
 
   /* ── calendar ── */
   const { weeks, monthLabel } = useMemo(() => {
@@ -148,15 +175,7 @@ export default function BookAppointment() {
     if (currentStep === 1) return Boolean(selectedDate);
     if (currentStep === 2) return Boolean(selectedTime);
     if (currentStep === 3) return visitType && description.trim();
-    if (currentStep === 4) {
-      if (payMethod !== "card") return true;
-      return (
-        cardName &&
-        cardNumber.replace(/\s/g, "").length >= 12 &&
-        expiry.length >= 4 &&
-        cvv.length >= 3
-      );
-    }
+    if (currentStep === 4) return true;
     return false;
   };
 
@@ -167,7 +186,7 @@ export default function BookAppointment() {
         "Please select a date.",
         "Please select a time slot.",
         "Please complete all visit details.",
-        "Please complete payment information.",
+        "Please choose a payment method.",
       ];
       return setError(msgs[currentStep - 1]);
     }
@@ -176,7 +195,19 @@ export default function BookAppointment() {
       return;
     }
     setLoading(true);
-    setTimeout(() => navigate("/appointment-confirm"), 1500);
+    setTimeout(() => {
+      navigate("/payment", {
+        state: {
+          booking: {
+            doctor,
+            selectedDate: selectedDate?.toISOString(),
+            selectedTime,
+            visitType,
+            description,
+          },
+        },
+      });
+    }, 900);
   };
 
   const handleBack = () => {
@@ -546,120 +577,11 @@ export default function BookAppointment() {
                 {/* ── PAYMENT ── */}
                 {currentStep === 4 && (
                   <div className="space-y-5">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-700 mb-3">
-                        Payment method
-                      </p>
-                      <div className="grid grid-cols-3 gap-2.5">
-                        {[
-                          { key: "card", Icon: CreditCard, label: "Card" },
-                          { key: "upi", Icon: Smartphone, label: "UPI" },
-                          {
-                            key: "cash",
-                            Icon: Banknote,
-                            label: "Cash at Clinic",
-                          },
-                        ].map((m) => (
-                          <button
-                            key={m.key}
-                            onClick={() => setPayMethod(m.key)}
-                            className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-semibold transition-all ${
-                              payMethod === m.key
-                                ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm"
-                                : "border-gray-200 bg-white text-gray-600 hover:border-emerald-300"
-                            }`}
-                          >
-                            <m.Icon
-                              className={`w-4 h-4 ${payMethod === m.key ? "text-emerald-600" : "text-gray-400"}`}
-                              strokeWidth={1.8}
-                            />
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {payMethod === "card" && (
-                      <div className="grid grid-cols-2 gap-4">
-                        {[
-                          {
-                            label: "Name on Card",
-                            val: cardName,
-                            set: setCardName,
-                            ph: "John Doe",
-                            type: "text",
-                            span: true,
-                          },
-                          {
-                            label: "Card Number",
-                            val: cardNumber,
-                            set: setCardNumber,
-                            ph: "1234 5678 9012 3456",
-                            type: "text",
-                            span: true,
-                          },
-                          {
-                            label: "Expiry",
-                            val: expiry,
-                            set: setExpiry,
-                            ph: "MM / YY",
-                            type: "text",
-                            span: false,
-                          },
-                          {
-                            label: "CVV",
-                            val: cvv,
-                            set: setCvv,
-                            ph: "•••",
-                            type: "password",
-                            span: false,
-                          },
-                        ].map((f) => (
-                          <div
-                            key={f.label}
-                            className={f.span ? "col-span-2" : ""}
-                          >
-                            <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-                              {f.label}
-                            </label>
-                            <input
-                              type={f.type}
-                              value={f.val}
-                              onChange={(e) => f.set(e.target.value)}
-                              placeholder={f.ph}
-                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-50"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {payMethod === "upi" && (
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 flex items-center gap-3 text-sm text-gray-600">
-                        <Smartphone
-                          className="w-5 h-5 text-emerald-500 shrink-0"
-                          strokeWidth={1.8}
-                        />
-                        You will be redirected to your UPI app after confirming.
-                      </div>
-                    )}
-
-                    {payMethod === "cash" && (
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 flex items-center gap-3 text-sm text-gray-600">
-                        <Building2
-                          className="w-5 h-5 text-emerald-500 shrink-0"
-                          strokeWidth={1.8}
-                        />
-                        Pay at the clinic reception before your appointment.
-                      </div>
-                    )}
-
-                    {/* Summary */}
                     <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 px-5 py-5">
                       <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-widest mb-4">
                         Booking Summary
                       </p>
-                      <div className="space-y-2.5 text-sm">
+                      <div className="space-y-3 text-sm text-gray-700">
                         <SummaryRow
                           icon={
                             <Stethoscope
@@ -707,9 +629,15 @@ export default function BookAppointment() {
                       <div className="mt-4 pt-4 border-t border-emerald-200 flex items-center justify-between">
                         <span className="text-sm text-gray-500">Total</span>
                         <span className="text-2xl font-black text-emerald-600">
-                          ${doctor.consultationFee}
+                          Rs {doctor.consultationFee}
                         </span>
                       </div>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 text-sm text-gray-600">
+                      <p className="font-semibold text-gray-800 mb-2">Next step</p>
+                      <p>
+                        We will move you to a secure payment page and complete your booking.
+                      </p>
                     </div>
                   </div>
                 )}
