@@ -33,6 +33,14 @@ function AppRoutes() {
         <Route path="/doctors" element={<DoctorsList />} />
         <Route path="/doctors/:id" element={<DoctorProfile />} />
         <Route path="/book-appointment" element={<BookAppointment />} />
+
+        {/* Doctor Routes */}
+        <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
+        <Route path="/doctor-patients" element={<Patients />} />
+        <Route
+          path="/doctor-profile-setup"
+          element={<DoctorProfileSetup />}
+        />
       </Routes>
     </div>
   );

@@ -1,9 +1,8 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import doctorImg from "../assets/doctor.png";
 import logoImg from "../assets/logoimage.png";
 
-function Login() {
+function DoctorLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,20 +30,20 @@ function Login() {
         throw new Error(data.message || "Login failed");
       }
 
-      // Check if user is a patient
-      if (data.data.role !== "user") {
+      // Check if user is a doctor
+      if (data.data.role !== "doctor") {
         throw new Error(
-          "This account is not a patient account. Please use Doctor Login.",
+          "This account is not a doctor account. Please use Patient Login.",
         );
       }
 
       // Store credentials
-      localStorage.setItem("userId", data.data.id);
-      localStorage.setItem("userRole", "patient");
+      localStorage.setItem("doctorId", data.data.id);
+      localStorage.setItem("userRole", "doctor");
       localStorage.setItem("userEmail", data.data.email);
-      sessionStorage.setItem("userId", data.data.id);
+      sessionStorage.setItem("doctorId", data.data.id);
 
-      navigate("/dashboard");
+      navigate("/doctor/dashboard");
     } catch (err) {
       setError(err.message || "An error occurred during login");
     } finally {
@@ -60,8 +59,11 @@ function Login() {
           <div className="flex flex-col items-center justify-center mb-6">
             <img src={logoImg} alt="logo" className="h-[4.5rem] mb-3" />
             <h2 className="text-[1.20rem] font-extrabold text-gray-900 text-center tracking-tight">
-              Log In Now{" "}
+              Doctor Log In
             </h2>
+            <p className="text-xs text-gray-500 mt-1">
+              Manage your appointments & patients
+            </p>
           </div>
 
           {error && (
@@ -94,7 +96,7 @@ function Login() {
                 </svg>
                 <input
                   type="email"
-                  placeholder="e.g,yourname@gmail.com"
+                  placeholder="e.g, doctor@gmail.com"
                   className="w-full bg-transparent outline-none text-gray-800 placeholder-gray-500 font-medium"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -218,97 +220,55 @@ function Login() {
               )}
             </button>
 
-            {/* Social Icons & Register */}
-            <div className="flex justify-center gap-[1.1rem] mb-8 mr-1">
-              <button
-                type="button"
-                className="w-[3rem] h-[3rem] rounded-full border-[1.5px] border-gray-600 flex items-center justify-center hover:bg-gray-200 text-gray-600 outline-none"
-              >
-                <span className="font-bold text-lg">G</span>
-              </button>
-              <button
-                type="button"
-                className="w-[3rem] h-[3rem] rounded-full border-[1.5px] border-gray-600 flex items-center justify-center hover:bg-gray-200 text-gray-600 outline-none"
-              >
-                <svg
-                  viewBox="0 0 384 512"
-                  width="20"
-                  height="20"
-                  fill="currentColor"
-                  className="pb-[2px]"
-                >
-                  <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="w-[3rem] h-[3rem] rounded-full border-[1.5px] border-gray-600 flex items-center justify-center hover:bg-gray-200 text-gray-600 outline-none"
-              >
-                <span className="font-bold text-lg">f</span>
-              </button>
-            </div>
-
-            {/* Register */}
-            <div className="text-center text-[13px] font-bold text-gray-900 mb-6">
-              New to Swastha Sewa? Register for free
-              <div className="mt-3">
+            {/* Links */}
+            <div className="text-center text-sm mb-6">
+              <p className="text-gray-600 font-medium">
+                Don't have an account?{" "}
                 <Link
-                  to="/register"
-                  className="text-[#0f5c51] hover:underline font-extrabold text-[14px]"
+                  to="/doctor/register"
+                  className="text-[#0e5c53] hover:underline font-bold"
                 >
-                  Register Now
+                  Register as Doctor
                 </Link>
-              </div>
+              </p>
             </div>
 
-            {/* Doctor Login Link */}
+            {/* Patient vs Doctor toggle */}
             <div className="border-t border-gray-200 pt-6">
               <p className="text-center text-xs text-gray-500 mb-3">
-                Are you a doctor?
+                Are you a patient?
               </p>
               <Link
-                to="/doctor/login"
+                to="/login"
                 className="w-full py-2 border-2 border-gray-300 text-gray-700 font-bold rounded-full flex justify-center items-center hover:bg-gray-100 transition-colors"
               >
-                Doctor Login
+                Patient Login
               </Link>
             </div>
           </form>
         </div>
       </div>
 
-      <div className="w-full md:w-[55%] lg:w-1/2 relative hidden md:block overflow-hidden">
-        {/* Image */}
-        <img
-          src={doctorImg}
-          alt="Doctor"
-          className="w-full h-full object-cover object-center"
-          style={{
-            WebkitMaskImage:
-              "linear-gradient(to right, transparent 0%, black 25%)",
-            maskImage: "linear-gradient(to right, transparent 0%, black 25%)",
-          }}
-        />
-
-        {/* Text */}
-        <div className="absolute top-[25%] left-[8%] md:left-[12%] lg:left-[20%] xl:left-[-0%] -top-4 z-20">
-          <h2 className="text-[1rem] lg:text-[1.7rem] font-serif font-extrabold text-[#0f5c51] mb-2 leading-[1.2] tracking-wide">
-            A Healthier You is Just
-            <br />
-            an Appointment Away
-          </h2>
-          <p className="text-gray-900 text-base font-bold ml-1">
-            Access expert care, effortlessly
+      {/* RIGHT SIDE - Image (hidden on mobile) */}
+      <div className="hidden md:flex md:w-[55%] lg:w-1/2 bg-gradient-to-br from-emerald-100 to-emerald-200 flex-col justify-end items-center p-8 relative overflow-hidden">
+        <svg
+          className="absolute top-0 right-0 w-96 h-96 opacity-10"
+          fill="currentColor"
+          viewBox="0 0 200 200"
+        >
+          <circle cx="100" cy="100" r="80" />
+        </svg>
+        <div className="text-center z-10 mb-10">
+          <h3 className="text-3xl font-extrabold text-emerald-900 mb-3">
+            Welcome Back, Doctor
+          </h3>
+          <p className="text-emerald-700 text-lg font-medium">
+            Manage your practice efficiently
           </p>
         </div>
-      </div>
-
-      {/* Footer Text */}
-      <div className="absolute bottom-6 left-0 right-0 text-center text-sm font-bold text-gray-900 z-30">
-        Terms of Use | Privacy Link
       </div>
     </div>
   );
 }
 
-export default Login;
+export default DoctorLogin;
