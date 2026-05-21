@@ -68,9 +68,19 @@ function Register() {
       }
 
       // Store credentials
+      const registeredUser = {
+        id: data.data.id,
+        email: data.data.email,
+        role: data.data.role,
+      };
+      localStorage.setItem("user", JSON.stringify(registeredUser));
       localStorage.setItem("userId", data.data.id);
       localStorage.setItem("userRole", "patient");
       localStorage.setItem("userEmail", data.data.email);
+      localStorage.removeItem("userID");
+      localStorage.removeItem("doctorId");
+      sessionStorage.removeItem("userID");
+      sessionStorage.removeItem("doctorId");
       sessionStorage.setItem("userId", data.data.id);
 
       navigate("/dashboard");

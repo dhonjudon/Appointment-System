@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+
+const API_BASE = "http://localhost:3000/api";
 
 const StarRating = ({
   rating,
@@ -6,7 +8,7 @@ const StarRating = ({
   readOnly = false,
   size = "w-5 h-5",
 }) => {
-  return (+
+  return (
     <div className="flex space-x-1">
       {[1, 2, 3, 4, 5].map((star) => (
         <button
@@ -50,6 +52,87 @@ function Feedback() {
     "Thorough Examination",
     "Clean facility",
   ]);
+  const [appointments, setAppointments] = useState([]);
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const userId =
+    Number(
+      localStorage.getItem("userId") ||
+        localStorage.getItem("appointment_user_id") ||
+        1,
+    ) || 1;
+
+  const selectedAppointment =
+    appointments.find(
+      (appointment) => String(appointment.id) === String(selectedAppointmentId),
+    ) ||
+    appointments[0] ||
+    null;
+
+  useEffect(() => {
+    const fetchAppointments = async () => {
+      try {
+        setLoading(true);
+        setLoadError("");
+
+        const appointmentsRes = await fetch(
+          `${API_BASE}/users/${userId}/appointments?page=1&limit=100`,
+        );
+        const appointmentsData = await appointmentsRes.json().catch(() => ({}));
+        if (!appointmentsRes.ok || appointmentsData.success === false) {
+          throw new Error(
+            appointmentsData.message || "Unable to load your appointments.",
+          );
+        }
+
+        const items = (appointmentsData.data?.items || []).filter(
+          (appointment) =>
+            appointment.doctor_id &&
+            !["cancelled", "no_show"].includes(appointment.status),
+        );
+        setAppointments(items);
+        setSelectedAppointmentId(
+          (current) => current || String(items[0]?.id || ""),
+        );
+      } catch (err) {
+        setLoadError(err.message || "Unable to load your appointments.");
+        setAppointments([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAppointments();
+  }, [userId]);
+
+  useEffect(() => {
+    const doctorId = selectedAppointment?.doctor_id;
+    if (!doctorId) {
+      setReviews([]);
+      return;
+    }
+
+    const fetchReviews = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/doctors/${doctorId}/reviews?page=1&limit=20`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+          throw new Error(data.message || "Unable to load reviews.");
+        }
+
+        setReviews(data.data?.items || []);
+      } catch {
+        setReviews([]);
+      }
+    };
+
+    fetchReviews();
+  }, [selectedAppointment?.doctor_id]);
   const tags = [
     "Punctual Doctor",
     "Thorough Examination",
@@ -58,35 +141,54 @@ function Feedback() {
     "Easy Booking",
   ];
 
-  const [recommendation, setRecommendation] = useState("Definitely Yes");
   const [feedbackText, setFeedbackText] = useState("");
   const [reviews, setReviews] = useState([]);
 
-  const handleSubmit = () => {
-    if (!feedbackText.trim()) return;
+  const handleSubmit = async () => {
+    if (!selectedAppointment?.doctor_id) return;
 
-    const emojis = {
-      "Definitely Yes": "🤩",
-      "May Be": "🤔",
-      "Not Sure": "😐",
-      "Probably not": "😞",
-    };
+    try {
+      setSubmitting(true);
+      setSubmitError("");
 
-    const newReview = {
-      id: Date.now(),
-      text: feedbackText,
-      emoji: emojis[recommendation],
-      recommendation: recommendation,
-      date: new Date().toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }),
-      rating: ratings.overall,
-    };
+      const res = await fetch(`${API_BASE}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          doctor_id: selectedAppointment.doctor_id,
+          user_id: userId,
+          appointment_id: selectedAppointment.id,
+          rating: ratings.overall,
+          review_text: feedbackText.trim() || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || "Failed to submit feedback.");
+      }
 
-    setReviews([newReview, ...reviews]);
-    setFeedbackText("");
+      setReviews((prev) => [
+        {
+          id: data.data?.id || Date.now(),
+          text: feedbackText.trim(),
+          date: new Date().toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          }),
+          rating: ratings.overall,
+          first_name: "You",
+          last_name: "",
+        },
+        ...prev,
+      ]);
+      setFeedbackText("");
+      setRatings((current) => ({ ...current, overall: 4 }));
+    } catch (err) {
+      setSubmitError(err.message || "Failed to submit feedback.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const toggleTag = (tag) => {
@@ -101,6 +203,18 @@ function Feedback() {
     setRatings({ ...ratings, [key]: val });
   };
 
+  const averageRating = reviews.length
+    ? (
+        reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) /
+        reviews.length
+      ).toFixed(1)
+    : "0.0";
+
+  const ratingCounts = [5, 4, 3, 2, 1].map(
+    (score) =>
+      reviews.filter((review) => Number(review.rating) === score).length,
+  );
+
   return (
     <div className="bg-gradient-to-b from-emerald-50 to-white min-h-screen">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
@@ -112,6 +226,16 @@ function Feedback() {
             Review Your visit, read what your doctor noted, and share your
             experience
           </p>
+          {loadError && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              {loadError}
+            </div>
+          )}
+          {loading && !loadError && (
+            <p className="mt-3 text-sm text-gray-500">
+              Loading your appointments...
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
@@ -147,9 +271,11 @@ function Feedback() {
                   </p>
                 </div>
                 <div className="text-right flex flex-col justify-center h-full">
-                  <div className="text-2xl font-bold text-[#388e7b]">3</div>
+                  <div className="text-2xl font-bold text-[#388e7b]">
+                    {appointments.length}
+                  </div>
                   <div className="text-[11px] text-gray-500 tracking-tight">
-                    visits noted
+                    completed visits
                   </div>
                 </div>
               </div>
@@ -176,9 +302,11 @@ function Feedback() {
                   </p>
                 </div>
                 <div className="text-right flex flex-col justify-center h-full">
-                  <div className="text-2xl font-bold text-[#e88134]">4.7</div>
+                  <div className="text-2xl font-bold text-[#e88134]">
+                    {averageRating}
+                  </div>
                   <div className="text-[11px] text-gray-500 tracking-tight">
-                    avg rating
+                    average rating
                   </div>
                 </div>
               </div>
@@ -191,10 +319,30 @@ function Feedback() {
                 Which appointment are you reviewing?
               </p>
               <div className="relative">
-                <select className="w-full appearance-none border border-gray-200 rounded p-2.5 text-sm text-gray-700 outline-none focus:border-[#388e7b] bg-gray-50/50">
-                  <option>
-                    Dr. Pritam Shakya - Neurologist(March 24,2026)
-                  </option>
+                <select
+                  value={selectedAppointmentId}
+                  onChange={(e) => setSelectedAppointmentId(e.target.value)}
+                  className="w-full appearance-none border border-gray-200 rounded p-2.5 text-sm text-gray-700 outline-none focus:border-[#388e7b] bg-gray-50/50"
+                >
+                  {appointments.length === 0 ? (
+                    <option value="">No booked appointments</option>
+                  ) : (
+                    appointments.map((appointment) => (
+                      <option key={appointment.id} value={appointment.id}>
+                        {appointment.doctor_first_name}{" "}
+                        {appointment.doctor_last_name} -{" "}
+                        {appointment.specialization_name} (
+                        {new Date(
+                          `${appointment.appointment_date}T00:00:00`,
+                        ).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                        )
+                      </option>
+                    ))
+                  )}
                 </select>
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
                   <svg
@@ -286,74 +434,30 @@ function Feedback() {
               ></textarea>
             </div>
 
-            {/* Recommend */}
-            <div className="bg-white rounded-lg p-5 shadow-sm border border-gray-100">
-              <h3 className="font-bold text-[15px] mb-1">
-                Would you recommend Swastha Sewa?
-              </h3>
-              <p className="text-xs text-gray-500 mb-4">
-                Based on your whole experience
-              </p>
-
-              <div className="grid grid-cols-4 gap-3 mb-5">
-                <button
-                  onClick={() => setRecommendation("Definitely Yes")}
-                  className={`flex flex-col items-center justify-center py-4 rounded-lg transition-all bg-[#eef5fc] ${recommendation === "Definitely Yes" ? "border-2 border-blue-400" : "border border-[#a1bccc]"}`}
-                >
-                  <span className="text-3xl mb-1.5">🤩</span>
-                  <span className="text-xs font-bold text-gray-700">
-                    Definitely Yes
-                  </span>
-                </button>
-                <button
-                  onClick={() => setRecommendation("May Be")}
-                  className={`flex flex-col items-center justify-center py-4 rounded-lg transition-all bg-[#fdf9e6] ${recommendation === "May Be" ? "border-2 border-yellow-400" : "border border-[#ecca72]"}`}
-                >
-                  <span className="text-3xl mb-1.5">🤔</span>
-                  <span className="text-xs font-bold text-gray-700">
-                    May Be
-                  </span>
-                </button>
-                <button
-                  onClick={() => setRecommendation("Not Sure")}
-                  className={`flex flex-col items-center justify-center py-4 rounded-lg transition-all bg-[#fcf3fb] ${recommendation === "Not Sure" ? "border-2 border-purple-400" : "border border-[#dfa5d5]"}`}
-                >
-                  <span className="text-3xl mb-1.5">😐</span>
-                  <span className="text-xs font-bold text-gray-700">
-                    Not Sure
-                  </span>
-                </button>
-                <button
-                  onClick={() => setRecommendation("Probably not")}
-                  className={`flex flex-col items-center justify-center py-4 rounded-lg transition-all bg-[#fbe9ec] ${recommendation === "Probably not" ? "border-2 border-red-400" : "border border-[#eba0a6]"}`}
-                >
-                  <span className="text-3xl mb-1.5">😞</span>
-                  <span className="text-xs font-bold text-gray-700">
-                    Probably not
-                  </span>
-                </button>
-              </div>
-
-              <button
-                onClick={handleSubmit}
-                className="w-full bg-[#388e7b] hover:bg-[#2c7564] text-white font-bold py-3 rounded transition-colors flex items-center justify-center gap-2"
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || !selectedAppointment}
+              className="w-full bg-[#388e7b] hover:bg-[#2c7564] text-white font-bold py-3 rounded transition-colors flex items-center justify-center gap-2"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                  ></path>
-                </svg>
-                Submit Feedback
-              </button>
-            </div>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                ></path>
+              </svg>
+              {submitting ? "Submitting..." : "Submit Feedback"}
+            </button>
+            {submitError && (
+              <p className="mt-2 text-sm text-rose-600">{submitError}</p>
+            )}
           </div>
 
           {/* Right Column */}
@@ -381,7 +485,7 @@ function Feedback() {
               </div>
               <div className="text-right flex flex-col justify-center h-full">
                 <div className="text-[22px] font-bold text-[#2b688d] leading-none mb-0.5">
-                  1247
+                  {reviews.length}
                 </div>
                 <div className="text-[10px] text-gray-500">total reviews</div>
               </div>
@@ -394,66 +498,42 @@ function Feedback() {
               </h3>
               <div className="flex flex-col items-center mb-5">
                 <h1 className="text-5xl font-extrabold text-[#388e7b] mb-2">
-                  4.7
+                  {averageRating}
                 </h1>
                 <StarRating rating={5} readOnly={true} size="w-6 h-6" />
               </div>
               <div className="space-y-3">
-                <div className="flex items-center gap-2 text-xs text-gray-700 font-medium">
-                  <span className="w-4">5</span>
-                  <svg
-                    className="w-3 h-3 text-gray-700"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  <ProgressBar value={85} colorClass="bg-[#388e7b]" />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-700 font-medium">
-                  <span className="w-4">4</span>
-                  <svg
-                    className="w-3 h-3 text-gray-700"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  <ProgressBar value={35} colorClass="bg-[#4bc0c0]" />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-700 font-medium">
-                  <span className="w-4">3</span>
-                  <svg
-                    className="w-3 h-3 text-gray-700"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  <ProgressBar value={15} colorClass="bg-yellow-400" />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-700 font-medium">
-                  <span className="w-4">2</span>
-                  <svg
-                    className="w-3 h-3 text-gray-700"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  <ProgressBar value={5} colorClass="bg-orange-400" />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-700 font-medium">
-                  <span className="w-4">1</span>
-                  <svg
-                    className="w-3 h-3 text-gray-700"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  <ProgressBar value={2} colorClass="bg-red-500" />
-                </div>
+                {[5, 4, 3, 2, 1].map((score, index) => {
+                  const total = reviews.length || 1;
+                  const value = Math.round((ratingCounts[index] / total) * 100);
+                  const colorClass =
+                    score === 5
+                      ? "bg-[#388e7b]"
+                      : score === 4
+                        ? "bg-[#4bc0c0]"
+                        : score === 3
+                          ? "bg-yellow-400"
+                          : score === 2
+                            ? "bg-orange-400"
+                            : "bg-red-500";
+
+                  return (
+                    <div
+                      key={score}
+                      className="flex items-center gap-2 text-xs text-gray-700 font-medium"
+                    >
+                      <span className="w-4">{score}</span>
+                      <svg
+                        className="w-3 h-3 text-gray-700"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      <ProgressBar value={value} colorClass={colorClass} />
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -474,19 +554,16 @@ function Feedback() {
                       className="p-3 border border-gray-100 rounded-lg bg-gray-50/30"
                     >
                       <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">{review.emoji}</span>
-                          <div>
-                            <p className="text-xs font-bold text-gray-700">
-                              {review.recommendation}
-                            </p>
-                            <div className="flex items-center">
-                              <StarRating
-                                rating={review.rating}
-                                readOnly={true}
-                                size="w-3 h-3"
-                              />
-                            </div>
+                        <div>
+                          <p className="text-xs font-bold text-gray-700">
+                            {review.first_name || "A patient"} left feedback
+                          </p>
+                          <div className="flex items-center">
+                            <StarRating
+                              rating={review.rating}
+                              readOnly={true}
+                              size="w-3 h-3"
+                            />
                           </div>
                         </div>
                         <span className="text-[10px] text-gray-400">
@@ -494,7 +571,7 @@ function Feedback() {
                         </span>
                       </div>
                       <p className="text-xs text-gray-600 leading-relaxed">
-                        {review.text}
+                        {review.review_text || review.text}
                       </p>
                     </div>
                   ))}

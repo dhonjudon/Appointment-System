@@ -133,7 +133,9 @@ CREATE TABLE IF NOT EXISTS doctor_schedules (
     id BIGSERIAL PRIMARY KEY,
     doctor_id BIGINT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
     hospital_id BIGINT REFERENCES hospitals(id) ON DELETE SET NULL,
-    day_of_week SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+    schedule_type VARCHAR(10) NOT NULL DEFAULT 'day' CHECK (schedule_type IN ('day', 'date')),
+    day_of_week SMALLINT CHECK (day_of_week BETWEEN 0 AND 6),
+    specific_date DATE,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
     slot_duration_minutes SMALLINT NOT NULL DEFAULT 30 CHECK (slot_duration_minutes > 0),
@@ -142,7 +144,7 @@ CREATE TABLE IF NOT EXISTS doctor_schedules (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (end_time > start_time),
-    UNIQUE (doctor_id, hospital_id, day_of_week, start_time, end_time)
+    UNIQUE (doctor_id, hospital_id, schedule_type, day_of_week, specific_date, start_time, end_time)
 );
 
 CREATE TABLE IF NOT EXISTS appointments (

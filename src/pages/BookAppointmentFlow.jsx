@@ -37,7 +37,9 @@ const addMinutes = (time24, minutesToAdd) => {
 };
 
 const buildSlots = (schedules = [], bookedSlots = []) => {
-  const bookedSet = new Set(bookedSlots.map((slot) => `${slot.start_time}-${slot.end_time}`));
+  const bookedSet = new Set(
+    bookedSlots.map((slot) => `${slot.start_time}-${slot.end_time}`),
+  );
   const slots = [];
 
   schedules.forEach((schedule) => {
@@ -78,12 +80,16 @@ function BookAppointmentFlow() {
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [visitReason, setVisitReason] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("card");
-  const [userId, setUserId] = useState(localStorage.getItem("appointment_user_id") || "");
+  const [userId, setUserId] = useState(
+    localStorage.getItem("appointment_user_id") || "",
+  );
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const consultationFee = Number(doctor?.consultationFee || doctor?.consultation_fee || 0);
+  const consultationFee = Number(
+    doctor?.consultationFee || doctor?.consultation_fee || 0,
+  );
 
   useEffect(() => {
     if (!doctor?.id) return;
@@ -99,7 +105,10 @@ function BookAppointmentFlow() {
         );
 
         const payload = data?.data || {};
-        const slots = buildSlots(payload.schedules || [], payload.booked_slots || []);
+        const slots = buildSlots(
+          payload.schedules || [],
+          payload.booked_slots || [],
+        );
         setAvailableSlots(slots);
       } catch (slotError) {
         console.error(slotError);
@@ -148,6 +157,10 @@ function BookAppointmentFlow() {
       );
       const appointment = appointmentRes?.data?.data;
 
+      if (!appointment?.id) {
+        throw new Error("Failed to create appointment - no ID received");
+      }
+
       const paymentRes = await axios.post(`${API_BASE_URL}/payments`, {
         appointment_id: appointment.id,
         user_id: Number(userId),
@@ -168,7 +181,7 @@ function BookAppointmentFlow() {
         },
       );
 
-      navigate("/appointment", {
+      navigate(`/appointment-confirm?id=${appointment.id}`, {
         state: {
           doctor,
           appointment,
@@ -182,7 +195,9 @@ function BookAppointmentFlow() {
       });
     } catch (submitError) {
       console.error(submitError);
-      setError(submitError?.response?.data?.message || "Booking failed. Try again.");
+      setError(
+        submitError?.response?.data?.message || "Booking failed. Try again.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -192,7 +207,9 @@ function BookAppointmentFlow() {
     return (
       <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-white flex items-center justify-center p-6">
         <div className="max-w-md rounded-xl border border-emerald-100 bg-white p-6 text-center">
-          <h2 className="text-xl font-bold text-gray-800">No doctor selected</h2>
+          <h2 className="text-xl font-bold text-gray-800">
+            No doctor selected
+          </h2>
           <p className="mt-2 text-sm text-gray-500">
             Please choose a doctor first and continue with booking.
           </p>
@@ -212,15 +229,20 @@ function BookAppointmentFlow() {
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-white px-6 py-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="rounded-xl border border-emerald-100 bg-white p-5">
-          <h1 className="text-xl font-bold text-gray-800">Complete Appointment Booking</h1>
+          <h1 className="text-xl font-bold text-gray-800">
+            Complete Appointment Booking
+          </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Doctor: {doctor.name} | Consultation fee: ${consultationFee.toFixed(2)}
+            Doctor: {doctor.name} | Consultation fee: $
+            {consultationFee.toFixed(2)}
           </p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
           <div className="rounded-xl border border-emerald-100 bg-white p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">1. Select date and slot</h2>
+            <h2 className="font-semibold text-gray-800">
+              1. Select date and slot
+            </h2>
             <input
               type="date"
               className="w-full rounded-lg border border-gray-200 px-3 py-2"
@@ -249,12 +271,16 @@ function BookAppointmentFlow() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500">No open slots for the selected date.</p>
+              <p className="text-sm text-gray-500">
+                No open slots for the selected date.
+              </p>
             )}
           </div>
 
           <div className="rounded-xl border border-emerald-100 bg-white p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">2. Patient and payment details</h2>
+            <h2 className="font-semibold text-gray-800">
+              2. Patient and payment details
+            </h2>
             <input
               type="number"
               min="1"
@@ -296,8 +322,8 @@ function BookAppointmentFlow() {
             {selectedSlot?.label || "Not selected"}
           </p>
           <p className="text-sm text-gray-600">
-            Payment method: {paymentMethod.toUpperCase()} | Dynamic total will be calculated
-            by backend.
+            Payment method: {paymentMethod.toUpperCase()} | Dynamic total will
+            be calculated by backend.
           </p>
           {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
           <div className="mt-4 flex justify-end">

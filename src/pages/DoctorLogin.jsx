@@ -37,11 +37,31 @@ function DoctorLogin() {
         );
       }
 
+      const userId = data.data.id;
+
+      // Fetch doctor ID from doctors table using user_id
+      const doctorResponse = await fetch(
+        `http://localhost:3000/api/doctors/user/${userId}`,
+      );
+
+      if (!doctorResponse.ok) {
+        throw new Error("Failed to fetch doctor profile");
+      }
+
+      const doctorData = await doctorResponse.json();
+      const doctorId = doctorData.data?.id;
+
+      if (!doctorId) {
+        throw new Error("Doctor profile not found");
+      }
+
       // Store credentials
-      localStorage.setItem("doctorId", data.data.id);
+      localStorage.setItem("userID", userId);
+      localStorage.setItem("doctorId", doctorId);
       localStorage.setItem("userRole", "doctor");
       localStorage.setItem("userEmail", data.data.email);
-      sessionStorage.setItem("doctorId", data.data.id);
+      sessionStorage.setItem("userID", userId);
+      sessionStorage.setItem("doctorId", doctorId);
 
       navigate("/doctor/dashboard");
     } catch (err) {
@@ -234,7 +254,7 @@ function DoctorLogin() {
             </div>
 
             {/* Patient vs Doctor toggle */}
-            <div className="border-t border-gray-200 pt-6">
+            <div className="border-t border-gray-200 pt-6 mb-4">
               <p className="text-center text-xs text-gray-500 mb-3">
                 Are you a patient?
               </p>
@@ -243,6 +263,19 @@ function DoctorLogin() {
                 className="w-full py-2 border-2 border-gray-300 text-gray-700 font-bold rounded-full flex justify-center items-center hover:bg-gray-100 transition-colors"
               >
                 Patient Login
+              </Link>
+            </div>
+
+            {/* Admin Login Link */}
+            <div>
+              <p className="text-center text-xs text-gray-500 mb-3">
+                Are you an administrator?
+              </p>
+              <Link
+                to="/admin/login"
+                className="w-full py-2 border-2 border-red-400 text-red-600 font-bold rounded-full flex justify-center items-center hover:bg-red-50 transition-colors"
+              >
+                Admin Login
               </Link>
             </div>
           </form>

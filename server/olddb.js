@@ -1,23 +1,23 @@
-  const express = require("express");
-  const cors = require("cors");
-  const bcrypt = require("bcrypt");
-  const { Pool } = require("pg");
-  require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const bcrypt = require("bcrypt");
+const { Pool } = require("pg");
+require("dotenv").config();
 
-  const router = express.Router();
-  router.use(cors());
-  router.use(express.json());
+const router = express.Router();
+router.use(cors());
+router.use(express.json());
 
-  const pool = new Pool({
-    user: process.env.PGUSER || "sasika",
-    password: process.env.PGPASSWORD || "1903sasika400",
-    host: process.env.PGHOST || "localhost",
-    port: Number(process.env.PGPORT || 5432),
-    database: process.env.PGDATABASE || "doctor_appointment_system",
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-  });
+const pool = new Pool({
+  user: process.env.PGUSER || "sasika",
+  password: process.env.PGPASSWORD || "1903sasika400",
+  host: process.env.PGHOST || "localhost",
+  port: Number(process.env.PGPORT || 5432),
+  database: process.env.PGDATABASE || "doctor_appointment_system",
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
 
 const APPOINTMENT_ACTIVE_STATUSES = ["pending", "confirmed", "rescheduled"];
 
@@ -433,97 +433,42 @@ const doctorService = {
     return result.rows[0];
   },
 
-  /**
-   * Returns schedules + booked slots for a given doctor on a given date.
-   *
-   * Priority:
-   *   1. date-specific schedules (schedule_type = 'date', specific_date = $date)
-   *   2. fallback to day-of-week schedules (schedule_type = 'day', day_of_week = DOW of $date)
-   *
-   * The response includes a `source` field so the client knows which kind was used.
-   */
   getAvailableSchedules: async (doctorId, date) => {
+    const schedulesResult = await pool.query(
+      `
+				SELECT id, doctor_id, hospital_id, day_of_week, start_time, end_time, slot_duration_minutes, max_patients_per_slot
+				FROM doctor_schedules
+				WHERE doctor_id = $1
+					AND is_active = TRUE
+          AND ($2::date IS NULL OR day_of_week = EXTRACT(DOW FROM $2::date)::text)
+				ORDER BY start_time
+			`,
+      [doctorId, date || null],
+    );
+
     if (!date) {
-      // No date supplied — return all active schedules for reference
-      const schedulesResult = await pool.query(
-        `
-          SELECT
-            id, doctor_id, hospital_id,
-            schedule_type, day_of_week, specific_date::text,
-            start_time, end_time, slot_duration_minutes, max_patients_per_slot
-          FROM doctor_schedules
-          WHERE doctor_id = $1 AND is_active = TRUE
-          ORDER BY schedule_type DESC, day_of_week ASC, start_time ASC
-        `,
-        [doctorId],
-      );
       return {
         date: null,
-        source: null,
         schedules: schedulesResult.rows,
         booked_slots: [],
       };
     }
 
-    // 1. Look for date-specific overrides first
-    const dateSchedulesResult = await pool.query(
-      `
-        SELECT
-          id, doctor_id, hospital_id,
-          schedule_type, day_of_week, specific_date::text,
-          start_time, end_time, slot_duration_minutes, max_patients_per_slot
-        FROM doctor_schedules
-        WHERE doctor_id = $1
-          AND is_active = TRUE
-          AND schedule_type = 'date'
-          AND specific_date = $2::date
-        ORDER BY start_time ASC
-      `,
-      [doctorId, date],
-    );
-
-    // 2. Fallback to day-of-week schedules
-    const daySchedulesResult = await pool.query(
-      `
-        SELECT
-          id, doctor_id, hospital_id,
-          schedule_type, day_of_week, specific_date::text,
-          start_time, end_time, slot_duration_minutes, max_patients_per_slot
-        FROM doctor_schedules
-        WHERE doctor_id = $1
-          AND is_active = TRUE
-          AND schedule_type = 'day'
-          AND (
-            day_of_week::text = EXTRACT(DOW FROM $2::date)::int::text
-            OR lower(trim(day_of_week::text)) = lower(to_char($2::date, 'FMDay'))
-          )
-        ORDER BY start_time ASC
-      `,
-      [doctorId, date],
-    );
-
-    const useDateOverride = dateSchedulesResult.rowCount > 0;
-    const schedules = useDateOverride
-      ? dateSchedulesResult.rows
-      : daySchedulesResult.rows;
-
-    // Booked slots for that date
     const bookedResult = await pool.query(
       `
-        SELECT id, start_time, end_time, status
-        FROM appointments
-        WHERE doctor_id = $1
-          AND appointment_date = $2
-          AND status = ANY($3::appointment_status[])
-        ORDER BY start_time ASC
-      `,
+				SELECT id, start_time, end_time, status
+				FROM appointments
+				WHERE doctor_id = $1
+					AND appointment_date = $2
+					AND status = ANY($3::appointment_status[])
+				ORDER BY start_time ASC
+			`,
       [doctorId, date, APPOINTMENT_ACTIVE_STATUSES],
     );
 
     return {
       date,
-      source: useDateOverride ? "date" : "day",
-      schedules,
+      schedules: schedulesResult.rows,
       booked_slots: bookedResult.rows,
     };
   },
@@ -532,13 +477,10 @@ const doctorService = {
   getDoctorSchedules: async (doctorId) => {
     const result = await pool.query(
       `
-        SELECT
-          id, doctor_id, hospital_id,
-          schedule_type, day_of_week, specific_date::text,
-          start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active
+        SELECT id, doctor_id, hospital_id, day_of_week, start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active
         FROM doctor_schedules
         WHERE doctor_id = $1
-        ORDER BY schedule_type DESC, day_of_week ASC NULLS LAST, specific_date ASC NULLS LAST, start_time ASC
+        ORDER BY day_of_week ASC, start_time ASC
       `,
       [doctorId],
     );
@@ -558,10 +500,12 @@ const doctorService = {
     const values = [doctorId];
     const filters = ["a.doctor_id = $1"];
 
+    // Filter by exact date
     if (date) {
       values.push(date);
       filters.push(`a.appointment_date = $${values.length}`);
     }
+    // Filter by month + year
     if (month && year) {
       values.push(year);
       values.push(month);
@@ -583,7 +527,6 @@ const doctorService = {
     const query = `
       SELECT
         a.*,
-        a.appointment_date::text AS appointment_date,
         up.first_name AS patient_first_name,
         up.last_name  AS patient_last_name,
         up.phone      AS patient_phone,
@@ -615,7 +558,7 @@ const doctorService = {
     };
   },
 
-  // ── DOCTOR SITE: Get all patients ──
+  // ── DOCTOR SITE: Get all patients (users who have/had appointments with this doctor) ──
   getDoctorPatients: async ({ doctorId, page, limit, offset }) => {
     const query = `
       SELECT DISTINCT ON (u.id)
@@ -658,12 +601,7 @@ const doctorService = {
     };
   },
 
-  /**
-   * Set availability — supports both 'day' (recurring weekday) and 'date' (specific date override).
-   *
-   * For 'day':  deactivates any existing schedule for that day_of_week, inserts a new one.
-   * For 'date': deactivates any existing schedule for that specific_date, inserts a new one.
-   */
+  // ── DOCTOR SITE: Set availability (by day-of-week OR by specific date) ──
   setAvailability: async ({
     doctorId,
     hospitalId,
@@ -679,74 +617,44 @@ const doctorService = {
     try {
       await client.query("BEGIN");
 
-      if (type === "day") {
-        // Deactivate existing day-of-week schedules for this doctor + day
-        await client.query(
-          `UPDATE doctor_schedules
-           SET is_active = FALSE
-           WHERE doctor_id = $1
-             AND schedule_type = 'day'
-             AND (
-               day_of_week::text = $2::int::text
-               OR lower(trim(day_of_week::text)) =
-                 (ARRAY['sunday','monday','tuesday','wednesday','thursday','friday','saturday'])[$2::int + 1]
-             )`,
-          [doctorId, day_of_week],
+      // For now, only support day-of-week schedules (database doesn't have schedule_type/specific_date columns yet)
+      // This will be updated once schema migration is complete
+      if (type === "date") {
+        // TODO: Implement date-specific schedules once schema is updated
+        console.warn(
+          "Date-specific schedules not yet supported (awaiting schema migration)",
         );
-
-        const result = await client.query(
-          `INSERT INTO doctor_schedules
-             (doctor_id, hospital_id, schedule_type, day_of_week, specific_date,
-              start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active)
-           VALUES ($1, $2, 'day', $3, NULL, $4, $5, $6, $7, TRUE)
-           RETURNING *`,
-          [
-            doctorId,
-            hospitalId || null,
-            day_of_week,
-            start_time,
-            end_time,
-            slot_duration_minutes || 30,
-            max_patients || 1,
-          ],
-        );
-
-        await client.query("COMMIT");
-        return result.rows[0];
-      } else if (type === "date") {
-        // Deactivate existing date-specific schedules for this doctor + date
-        await client.query(
-          `UPDATE doctor_schedules
-           SET is_active = FALSE
-           WHERE doctor_id = $1
-             AND schedule_type = 'date'
-             AND specific_date = $2::date`,
-          [doctorId, specific_date],
-        );
-
-        const result = await client.query(
-          `INSERT INTO doctor_schedules
-             (doctor_id, hospital_id, schedule_type, day_of_week, specific_date,
-              start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active)
-           VALUES ($1, $2, 'date', NULL, $3::date, $4, $5, $6, $7, TRUE)
-           RETURNING id, doctor_id, hospital_id, schedule_type, day_of_week, specific_date::text, start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active`,
-          [
-            doctorId,
-            hospitalId || null,
-            specific_date,
-            start_time,
-            end_time,
-            slot_duration_minutes || 30,
-            max_patients || 1,
-          ],
-        );
-
-        await client.query("COMMIT");
-        return result.rows[0];
-      } else {
         await client.query("ROLLBACK");
-        throw new Error("type must be 'day' or 'date'");
+        throw new Error(
+          "Date-specific schedules will be available after schema update",
+        );
       }
+
+      // Deactivate any existing schedule for this day
+      await client.query(
+        `UPDATE doctor_schedules
+         SET is_active = FALSE
+         WHERE doctor_id = $1 AND day_of_week = $2`,
+        [doctorId, day_of_week.toString()],
+      );
+
+      // Insert new day schedule
+      const result = await client.query(
+        `INSERT INTO doctor_schedules
+           (doctor_id, hospital_id, day_of_week, start_time, end_time, slot_duration_minutes, max_patients_per_slot, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE) RETURNING *`,
+        [
+          doctorId,
+          hospitalId || null,
+          day_of_week.toString(),
+          start_time,
+          end_time,
+          slot_duration_minutes || 30,
+          max_patients || 1,
+        ],
+      );
+      await client.query("COMMIT");
+      return result.rows[0];
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
@@ -765,12 +673,14 @@ const doctorService = {
       upcomingResult,
       doctorResult,
     ] = await Promise.all([
+      // Total unique patients
       pool.query(
         `SELECT COUNT(DISTINCT user_id)::int AS total_patients FROM appointments WHERE doctor_id = $1`,
         [doctorId],
       ),
+      // Today's appointments with patient info
       pool.query(
-        `SELECT a.*, a.appointment_date::text AS appointment_date, up.first_name, up.last_name, up.phone, u.email
+        `SELECT a.*, up.first_name, up.last_name, up.phone, u.email
          FROM appointments a
          JOIN users u ON u.id = a.user_id
          LEFT JOIN user_profiles up ON up.user_id = u.id
@@ -778,6 +688,7 @@ const doctorService = {
          ORDER BY a.start_time ASC`,
         [doctorId, today],
       ),
+      // Upcoming appointments (next 7 days excluding today)
       pool.query(
         `SELECT COUNT(*)::int AS upcoming_count
          FROM appointments
@@ -785,6 +696,7 @@ const doctorService = {
            AND status = ANY($3::appointment_status[])`,
         [doctorId, today, APPOINTMENT_ACTIVE_STATUSES],
       ),
+      // Doctor basic info
       pool.query(
         `SELECT d.*, up.first_name, up.last_name, s.name AS specialization_name
          FROM doctors d
@@ -823,6 +735,7 @@ doctorService.addDoctor = async (payload) => {
       bio,
     } = payload;
 
+    // 1. Check if user already exists (from register call)
     const userCheck = await client.query(
       `SELECT id FROM users WHERE email = $1`,
       [email],
@@ -830,8 +743,10 @@ doctorService.addDoctor = async (payload) => {
 
     let userId;
     if (userCheck.rowCount > 0) {
+      // User already exists from register call
       userId = userCheck.rows[0].id;
 
+      // Update user profile if it exists
       const profileCheck = await client.query(
         `SELECT id FROM user_profiles WHERE user_id = $1`,
         [userId],
@@ -850,6 +765,7 @@ doctorService.addDoctor = async (payload) => {
         );
       }
     } else {
+      // Create new user (for backwards compatibility)
       const hashedPassword = await bcrypt.hash(password, 12);
 
       const userResult = await client.query(
@@ -861,6 +777,7 @@ doctorService.addDoctor = async (payload) => {
 
       userId = userResult.rows[0].id;
 
+      // Create profile
       await client.query(
         `INSERT INTO user_profiles (user_id, first_name, last_name)
          VALUES ($1, $2, $3)`,
@@ -868,6 +785,7 @@ doctorService.addDoctor = async (payload) => {
       );
     }
 
+    // 2. Check if doctor record already exists for this user
     const doctorCheck = await client.query(
       `SELECT id FROM doctors WHERE user_id = $1`,
       [userId],
@@ -875,6 +793,7 @@ doctorService.addDoctor = async (payload) => {
 
     let doctorResult;
     if (doctorCheck.rowCount > 0) {
+      // Update existing doctor record
       doctorResult = await client.query(
         `UPDATE doctors SET 
           specialization_id = $1,
@@ -894,6 +813,7 @@ doctorService.addDoctor = async (payload) => {
         ],
       );
     } else {
+      // Create new doctor record
       doctorResult = await client.query(
         `INSERT INTO doctors (
           user_id,
@@ -926,145 +846,6 @@ doctorService.addDoctor = async (payload) => {
   }
 };
 
-doctorService.updateDoctorById = async (doctorId, payload) => {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    const existingDoctorResult = await client.query(
-      `SELECT id, user_id FROM doctors WHERE id = $1`,
-      [doctorId],
-    );
-
-    if (!existingDoctorResult.rowCount) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-
-    const userId = existingDoctorResult.rows[0].user_id;
-
-    const {
-      email,
-      password,
-      first_name,
-      last_name,
-      phone,
-      specialization_id,
-      license_number,
-      years_of_experience,
-      consultation_fee,
-      bio,
-    } = payload;
-
-    // Update users table (email/password)
-    const userSetParts = [];
-    const userValues = [];
-
-    if (email !== undefined) {
-      userValues.push(email);
-      userSetParts.push(`email = $${userValues.length}`);
-    }
-    if (password !== undefined && String(password).trim()) {
-      const hashedPassword = await bcrypt.hash(password, 12);
-      userValues.push(hashedPassword);
-      userSetParts.push(`password_hash = $${userValues.length}`);
-    }
-
-    if (userSetParts.length) {
-      userValues.push(userId);
-      await client.query(
-        `UPDATE users SET ${userSetParts.join(", ")} WHERE id = $${userValues.length}`,
-        userValues,
-      );
-    }
-
-    // Update or create user profile (name/phone)
-    if (
-      first_name !== undefined ||
-      last_name !== undefined ||
-      phone !== undefined
-    ) {
-      const profileExistsResult = await client.query(
-        `SELECT id FROM user_profiles WHERE user_id = $1`,
-        [userId],
-      );
-
-      if (profileExistsResult.rowCount) {
-        const profileSetParts = [];
-        const profileValues = [];
-
-        if (first_name !== undefined) {
-          profileValues.push(first_name);
-          profileSetParts.push(`first_name = $${profileValues.length}`);
-        }
-        if (last_name !== undefined) {
-          profileValues.push(last_name);
-          profileSetParts.push(`last_name = $${profileValues.length}`);
-        }
-        if (phone !== undefined) {
-          profileValues.push(phone);
-          profileSetParts.push(`phone = $${profileValues.length}`);
-        }
-
-        if (profileSetParts.length) {
-          profileValues.push(userId);
-          await client.query(
-            `UPDATE user_profiles SET ${profileSetParts.join(", ")} WHERE user_id = $${profileValues.length}`,
-            profileValues,
-          );
-        }
-      } else {
-        await client.query(
-          `INSERT INTO user_profiles (user_id, first_name, last_name, phone)
-           VALUES ($1, $2, $3, $4)`,
-          [userId, first_name || null, last_name || null, phone || null],
-        );
-      }
-    }
-
-    // Update doctors table
-    const doctorSetParts = [];
-    const doctorValues = [];
-
-    if (specialization_id !== undefined) {
-      doctorValues.push(specialization_id);
-      doctorSetParts.push(`specialization_id = $${doctorValues.length}`);
-    }
-    if (license_number !== undefined) {
-      doctorValues.push(license_number);
-      doctorSetParts.push(`license_number = $${doctorValues.length}`);
-    }
-    if (years_of_experience !== undefined) {
-      doctorValues.push(years_of_experience || 0);
-      doctorSetParts.push(`years_of_experience = $${doctorValues.length}`);
-    }
-    if (consultation_fee !== undefined) {
-      doctorValues.push(consultation_fee || 0);
-      doctorSetParts.push(`consultation_fee = $${doctorValues.length}`);
-    }
-    if (bio !== undefined) {
-      doctorValues.push(bio || null);
-      doctorSetParts.push(`bio = $${doctorValues.length}`);
-    }
-
-    if (doctorSetParts.length) {
-      doctorValues.push(doctorId);
-      await client.query(
-        `UPDATE doctors SET ${doctorSetParts.join(", ")} WHERE id = $${doctorValues.length}`,
-        doctorValues,
-      );
-    }
-
-    await client.query("COMMIT");
-    return await doctorService.getDoctorDetails(doctorId);
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-};
-
 const appointmentService = {
   bookAppointment: async ({
     user_id,
@@ -1088,36 +869,18 @@ const appointmentService = {
         throw new Error("Doctor not found");
       }
 
-      // Validate that the schedule covers this slot.
-      // A schedule matches if:
-      //   - It's the exact schedule_id requested
-      //   - AND it's active
-      //   - AND the slot time falls within the schedule window
-      //   - AND the schedule applies to the appointment_date
-      //     (date-specific schedules match the exact date;
-      //      day-of-week schedules match the DOW of the date)
       const scheduleResult = await client.query(
         `
-          SELECT id
-          FROM doctor_schedules
-          WHERE id = $1
-            AND doctor_id = $2
-            AND is_active = TRUE
-            AND start_time <= $3::time
-            AND end_time >= $4::time
-            AND (
-              (schedule_type = 'date' AND specific_date = $5::date)
-              OR
-              (
-                schedule_type = 'day'
-                AND (
-                  day_of_week::text = EXTRACT(DOW FROM $5::date)::int::text
-                  OR lower(trim(day_of_week::text)) = lower(to_char($5::date, 'FMDay'))
-                )
-              )
-            )
-        `,
-        [schedule_id, doctor_id, start_time, end_time, appointment_date],
+					SELECT id
+					FROM doctor_schedules
+					WHERE id = $1
+						AND doctor_id = $2
+						AND is_active = TRUE
+            AND day_of_week::int = EXTRACT(DOW FROM $3::date)::int
+						AND start_time <= $4::time
+						AND end_time >= $5::time
+				`,
+        [schedule_id, doctor_id, appointment_date, start_time, end_time],
       );
 
       if (!scheduleResult.rowCount) {
@@ -1128,14 +891,14 @@ const appointmentService = {
 
       const overlapResult = await client.query(
         `
-          SELECT id
-          FROM appointments
-          WHERE doctor_id = $1
-            AND appointment_date = $2
-            AND status = ANY($3::appointment_status[])
-            AND NOT (end_time <= $4::time OR start_time >= $5::time)
-          FOR UPDATE
-        `,
+					SELECT id
+					FROM appointments
+					WHERE doctor_id = $1
+						AND appointment_date = $2
+						AND status = ANY($3::appointment_status[])
+						AND NOT (end_time <= $4::time OR start_time >= $5::time)
+					FOR UPDATE
+				`,
         [
           doctor_id,
           appointment_date,
@@ -1151,20 +914,20 @@ const appointmentService = {
 
       const insertResult = await client.query(
         `
-          INSERT INTO appointments (
-            user_id,
-            doctor_id,
-            hospital_id,
-            schedule_id,
-            appointment_date,
-            start_time,
-            end_time,
-            status,
-            reason
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
-          RETURNING id
-        `,
+					INSERT INTO appointments (
+						user_id,
+						doctor_id,
+						hospital_id,
+						schedule_id,
+						appointment_date,
+						start_time,
+						end_time,
+						status,
+						reason
+					)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
+					RETURNING *
+				`,
         [
           user_id,
           doctor_id,
@@ -1177,30 +940,6 @@ const appointmentService = {
         ],
       );
 
-      const appointmentId = insertResult.rows[0].id;
-
-      // Fetch the appointment with doctor and hospital details
-      const fullAppointmentResult = await client.query(
-        `
-          SELECT
-            a.*,
-            a.appointment_date::text AS appointment_date,
-            d.user_id,
-            d.specialization_id,
-            s.name AS specialization_name,
-            up.first_name AS doctor_first_name,
-            up.last_name AS doctor_last_name,
-            h.name AS hospital_name
-          FROM appointments a
-          JOIN doctors d ON d.id = a.doctor_id
-          LEFT JOIN specializations s ON s.id = d.specialization_id
-          LEFT JOIN user_profiles up ON up.user_id = d.user_id
-          LEFT JOIN hospitals h ON h.id = a.hospital_id
-          WHERE a.id = $1
-        `,
-        [appointmentId],
-      );
-
       await client.query("COMMIT");
 
       await createNotification(
@@ -1208,29 +947,10 @@ const appointmentService = {
         "Appointment Confirmed",
         "Your appointment has been booked successfully.",
         "appointment",
-        { appointment_id: appointmentId },
+        { appointment_id: insertResult.rows[0].id },
       );
 
-      if (fullAppointmentResult.rows[0]?.user_id) {
-        const doctorFirstName =
-          fullAppointmentResult.rows[0].doctor_first_name ||
-          fullAppointmentResult.rows[0].first_name ||
-          "Doctor";
-        const doctorLastName =
-          fullAppointmentResult.rows[0].doctor_last_name ||
-          fullAppointmentResult.rows[0].last_name ||
-          "";
-        await createNotification(
-          fullAppointmentResult.rows[0].user_id,
-          "New Appointment Booked",
-          `${doctorFirstName} ${doctorLastName}`.trim() +
-            " booked an appointment.",
-          "appointment",
-          { appointment_id: appointmentId, role: "doctor" },
-        );
-      }
-
-      return fullAppointmentResult.rows[0];
+      return insertResult.rows[0];
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -1252,40 +972,6 @@ const appointmentService = {
 				RETURNING *
 			`,
       [appointmentId, userId, APPOINTMENT_ACTIVE_STATUSES],
-    );
-
-    return result.rows[0] || null;
-  },
-
-  cancelAppointmentByDoctor: async ({ appointmentId, doctorId }) => {
-    const result = await pool.query(
-      `
-				UPDATE appointments
-				SET status = 'cancelled',
-						cancelled_by = (SELECT user_id FROM doctors WHERE id = $2),
-						cancelled_at = NOW()
-				WHERE id = $1
-					AND doctor_id = $2
-					AND status = ANY($3::appointment_status[])
-				RETURNING *
-			`,
-      [appointmentId, doctorId, APPOINTMENT_ACTIVE_STATUSES],
-    );
-
-    return result.rows[0] || null;
-  },
-
-  markAppointmentCompletedByDoctor: async ({ appointmentId, doctorId }) => {
-    const result = await pool.query(
-      `
-				UPDATE appointments
-				SET status = 'completed'
-				WHERE id = $1
-					AND doctor_id = $2
-					AND status = ANY($3::appointment_status[])
-				RETURNING *
-			`,
-      [appointmentId, doctorId, APPOINTMENT_ACTIVE_STATUSES],
     );
 
     return result.rows[0] || null;
@@ -1386,7 +1072,7 @@ const appointmentService = {
 							end_time = $4,
 							status = 'rescheduled'
 					WHERE id = $1
-					RETURNING *, appointment_date::text AS appointment_date
+					RETURNING *
 				`,
         [appointmentId, new_appointment_date, new_start_time, new_end_time],
       );
@@ -1400,187 +1086,6 @@ const appointmentService = {
         "appointment",
         { appointment_id: appointmentId },
       );
-
-      const doctorUserResult = await client.query(
-        `SELECT user_id FROM doctors WHERE id = $1`,
-        [appointment.doctor_id],
-      );
-      if (doctorUserResult.rowCount && doctorUserResult.rows[0]?.user_id) {
-        await createNotification(
-          doctorUserResult.rows[0].user_id,
-          "Appointment Rescheduled",
-          `An appointment with ${appointment.appointment_date} has been rescheduled.`,
-          "appointment",
-          { appointment_id: appointmentId, role: "doctor" },
-        );
-      }
-
-      return updateResult.rows[0];
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  rescheduleAppointmentByDoctor: async ({
-    appointmentId,
-    doctorId,
-    new_appointment_date,
-    new_start_time,
-    new_end_time,
-    reason,
-  }) => {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      const appointmentResult = await client.query(
-        `
-					SELECT *
-					FROM appointments
-					WHERE id = $1
-						AND doctor_id = $2
-					FOR UPDATE
-				`,
-        [appointmentId, doctorId],
-      );
-
-      if (!appointmentResult.rowCount) {
-        throw new Error("Appointment not found");
-      }
-
-      const appointment = appointmentResult.rows[0];
-      if (
-        !["pending", "confirmed", "rescheduled"].includes(appointment.status)
-      ) {
-        throw new Error("Only active appointments can be rescheduled");
-      }
-
-      const scheduleResult = await client.query(
-        `
-					SELECT id
-					FROM doctor_schedules
-					WHERE doctor_id = $1
-						AND is_active = TRUE
-						AND start_time <= $2::time
-						AND end_time >= $3::time
-						AND (
-							(schedule_type = 'date' AND specific_date = $4::date)
-							OR
-							(
-								schedule_type = 'day'
-								AND (
-									day_of_week::text = EXTRACT(DOW FROM $4::date)::int::text
-									OR lower(trim(day_of_week::text)) = lower(to_char($4::date, 'FMDay'))
-								)
-							)
-						)
-					LIMIT 1
-				`,
-        [doctorId, new_start_time, new_end_time, new_appointment_date],
-      );
-
-      if (!scheduleResult.rowCount) {
-        throw new Error(
-          "Selected schedule is not available for the requested slot",
-        );
-      }
-
-      const overlapResult = await client.query(
-        `
-					SELECT id
-					FROM appointments
-					WHERE doctor_id = $1
-						AND id <> $2
-						AND appointment_date = $3
-						AND status = ANY($4::appointment_status[])
-						AND NOT (end_time <= $5::time OR start_time >= $6::time)
-					FOR UPDATE
-				`,
-        [
-          doctorId,
-          appointmentId,
-          new_appointment_date,
-          APPOINTMENT_ACTIVE_STATUSES,
-          new_start_time,
-          new_end_time,
-        ],
-      );
-
-      if (overlapResult.rowCount) {
-        throw new Error("Requested reschedule slot is unavailable");
-      }
-
-      const doctorUserResult = await client.query(
-        `SELECT user_id FROM doctors WHERE id = $1`,
-        [doctorId],
-      );
-      const rescheduledBy = doctorUserResult.rows[0]?.user_id || null;
-
-      await client.query(
-        `
-					INSERT INTO appointment_reschedules (
-						appointment_id,
-						old_appointment_date,
-						old_start_time,
-						old_end_time,
-						new_appointment_date,
-						new_start_time,
-						new_end_time,
-						rescheduled_by,
-						reason
-					)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-				`,
-        [
-          appointmentId,
-          appointment.appointment_date,
-          appointment.start_time,
-          appointment.end_time,
-          new_appointment_date,
-          new_start_time,
-          new_end_time,
-          rescheduledBy,
-          reason || null,
-        ],
-      );
-
-      const updateResult = await client.query(
-        `
-					UPDATE appointments
-					SET appointment_date = $2,
-							start_time = $3,
-							end_time = $4,
-							status = 'rescheduled'
-					WHERE id = $1
-					RETURNING *, appointment_date::text AS appointment_date
-				`,
-        [appointmentId, new_appointment_date, new_start_time, new_end_time],
-      );
-
-      await client.query("COMMIT");
-
-      if (appointment.user_id) {
-        await createNotification(
-          appointment.user_id,
-          "Appointment Rescheduled",
-          "Your appointment has been rescheduled by the doctor.",
-          "appointment",
-          { appointment_id: appointmentId },
-        );
-      }
-
-      if (rescheduledBy) {
-        await createNotification(
-          rescheduledBy,
-          "Appointment Rescheduled",
-          `An appointment on ${appointment.appointment_date} has been rescheduled.`,
-          "appointment",
-          { appointment_id: appointmentId, role: "doctor" },
-        );
-      }
 
       return updateResult.rows[0];
     } catch (error) {
@@ -1606,9 +1111,7 @@ const appointmentService = {
     const query = `
 			SELECT
 				a.*,
-				a.appointment_date::text AS appointment_date,
 				d.specialization_id,
-        d.consultation_fee,
 				s.name AS specialization_name,
 				up.first_name AS doctor_first_name,
 				up.last_name AS doctor_last_name,
@@ -1648,45 +1151,9 @@ const appointmentService = {
       items: listResult.rows,
     };
   },
-
-  getAppointmentById: async (appointmentId) => {
-    const query = `
-      SELECT
-        a.*,
-        a.appointment_date::text AS appointment_date,
-        d.specialization_id,
-        d.consultation_fee,
-        s.name AS specialization_name,
-        up.first_name AS doctor_first_name,
-        up.last_name AS doctor_last_name,
-        h.name AS hospital_name
-      FROM appointments a
-      JOIN doctors d ON d.id = a.doctor_id
-      LEFT JOIN specializations s ON s.id = d.specialization_id
-      LEFT JOIN user_profiles up ON up.user_id = d.user_id
-      LEFT JOIN hospitals h ON h.id = a.hospital_id
-      WHERE a.id = $1
-    `;
-
-    const result = await pool.query(query, [appointmentId]);
-    return result.rows[0] || null;
-  },
 };
 
 const medicalService = {
-  getMedicalHistory: async (userId) => {
-    const result = await pool.query(
-      `
-				SELECT *
-				FROM medical_history
-				WHERE user_id = $1
-			`,
-      [userId],
-    );
-
-    return result.rows[0] || null;
-  },
-
   addMedicalHistory: async (payload) => {
     const {
       user_id,
@@ -1896,11 +1363,10 @@ const paymentService = {
         `
           UPDATE payments
           SET
-            status = $2::payment_status,
+            status = $2,
             provider_payment_id = COALESCE($3, provider_payment_id),
-            paid_at = CASE WHEN $2::payment_status = 'paid'::payment_status THEN NOW() ELSE paid_at END
+            paid_at = CASE WHEN $2 = 'paid' THEN NOW() ELSE paid_at END
           WHERE id = $1
-            d.consultation_fee,
             AND user_id = $4
           RETURNING *
         `,
@@ -1942,908 +1408,6 @@ const paymentService = {
       client.release();
     }
   },
-};
-
-let chatbotHistory = [];
-const chatbotSessions = new Map();
-const chatbotStopWords = new Set([
-  "book",
-  "booking",
-  "appointment",
-  "doctor",
-  "doctors",
-  "with",
-  "for",
-  "today",
-  "tomorrow",
-  "please",
-  "need",
-  "want",
-  "visit",
-  "consultation",
-  "general",
-  "follow",
-  "new",
-  "symptoms",
-  "symptom",
-  "date",
-  "time",
-  "morning",
-  "afternoon",
-  "evening",
-  "fill",
-  "that",
-  "this",
-  "the",
-  "and",
-  "can",
-  "you",
-  "me",
-  "my",
-  "suggest",
-  "suggestion",
-  "suggestions",
-  "recommend",
-  "recommendation",
-  "recommendations",
-  "find",
-  "show",
-  "list",
-  "best",
-  "top",
-  "nearest",
-  "nearby",
-]);
-
-const isChatbotBookingIntent = (message = "") => {
-  const lower = String(message).toLowerCase();
-
-  return (
-    /\b(book|booking|appointment|schedule|resched|reschedule|availability|available|slot|slots|time|date|visit|consult|consultation|follow[\s-]?up|checkup|symptom|symptoms|continue|fill|tomorrow|today|morning|afternoon|evening)\b/.test(
-      lower,
-    ) ||
-    /\b\d{1,2}(:\d{2})?\s*(am|pm)\b/.test(lower) ||
-    /\b(next\s+)?(sun|mon|tue|wed|thu|fri|sat)\b/.test(lower)
-  );
-};
-
-const isChatbotSuggestionIntent = (message = "") =>
-  /\b(suggest|suggestion|suggestions|recommend|recommendation|recommendations|find|show|list|best|top|nearby|nearest|who are|which doctors?|what doctors?)\b/.test(
-    String(message).toLowerCase(),
-  );
-
-const chatbotSearchAliases = {
-  teeth: "dental",
-  tooth: "dental",
-  teeths: "dental",
-  tooths: "dental",
-  dentist: "dental",
-  dentists: "dental",
-  dentistry: "dental",
-  oral: "dental",
-  mouth: "dental",
-  cardiologists: "cardiologist",
-  neurologists: "neurologist",
-  dermatologists: "dermatologist",
-  pediatricians: "pediatrician",
-  psychiatrists: "psychiatrist",
-  gynecologists: "gynecologist",
-  orthopedics: "orthopedic",
-};
-
-const normalizeChatbotSearchMessage = (message = "") =>
-  message
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .map((word) => chatbotSearchAliases[word] || word)
-    .join(" ");
-
-const formatDoctorName = (doctor = {}) => {
-  const fullName = [doctor.first_name, doctor.last_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return fullName ? `Dr. ${fullName}` : `Doctor ${doctor.id}`;
-};
-
-const chatbotToISODate = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const chatbotMonthNames = {
-  jan: 0,
-  january: 0,
-  feb: 1,
-  february: 1,
-  mar: 2,
-  march: 2,
-  apr: 3,
-  april: 3,
-  may: 4,
-  jun: 5,
-  june: 5,
-  jul: 6,
-  july: 6,
-  aug: 7,
-  august: 7,
-  sep: 8,
-  sept: 8,
-  september: 8,
-  oct: 9,
-  october: 9,
-  nov: 10,
-  november: 10,
-  dec: 11,
-  december: 11,
-};
-
-const chatbotWeekdays = {
-  sunday: 0,
-  sun: 0,
-  monday: 1,
-  mon: 1,
-  tuesday: 2,
-  tue: 2,
-  tues: 2,
-  wednesday: 3,
-  wed: 3,
-  thursday: 4,
-  thu: 4,
-  thur: 4,
-  thurs: 4,
-  friday: 5,
-  fri: 5,
-  saturday: 6,
-  sat: 6,
-};
-
-const chatbotNumberWords = {
-  one: 1,
-  first: 1,
-  two: 2,
-  second: 2,
-  three: 3,
-  third: 3,
-  four: 4,
-  fourth: 4,
-  five: 5,
-  fifth: 5,
-  six: 6,
-  sixth: 6,
-  seven: 7,
-  seventh: 7,
-  eight: 8,
-  eighth: 8,
-  nine: 9,
-  ninth: 9,
-  ten: 10,
-  tenth: 10,
-  eleven: 11,
-  eleventh: 11,
-  twelve: 12,
-  twelfth: 12,
-  thirteen: 13,
-  thirteenth: 13,
-  fourteen: 14,
-  fourteenth: 14,
-  fifteen: 15,
-  fifteenth: 15,
-  sixteen: 16,
-  sixteenth: 16,
-  seventeen: 17,
-  seventeenth: 17,
-  eighteen: 18,
-  eighteenth: 18,
-  nineteen: 19,
-  nineteenth: 19,
-  twenty: 20,
-  twentieth: 20,
-  thirty: 30,
-  thirtieth: 30,
-  thirtyfirst: 31,
-  "thirty first": 31,
-};
-
-const parseChatbotDayNumber = (value = "") => {
-  const normalized = String(value)
-    .toLowerCase()
-    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/g, "$1")
-    .replace(/[-]+/g, " ")
-    .trim();
-
-  const numeric = Number(normalized);
-  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 31) {
-    return numeric;
-  }
-
-  if (chatbotNumberWords[normalized]) {
-    return chatbotNumberWords[normalized];
-  }
-
-  const parts = normalized.split(/\s+/);
-  if (
-    parts.length === 2 &&
-    chatbotNumberWords[parts[0]] &&
-    chatbotNumberWords[parts[1]]
-  ) {
-    const combined =
-      chatbotNumberWords[parts[0]] + chatbotNumberWords[parts[1]];
-    if (combined >= 1 && combined <= 31) return combined;
-  }
-
-  return null;
-};
-
-const chatbotDateFromMonthDay = (month, day, today) => {
-  const date = new Date(today.getFullYear(), month, day);
-  if (date < today) {
-    date.setFullYear(date.getFullYear() + 1);
-  }
-  return chatbotToISODate(date);
-};
-
-const parseChatbotDate = (message = "", session = {}) => {
-  const lower = message
-    .toLowerCase()
-    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/g, "$1")
-    .replace(/[,]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const singleDayMatch = lower.match(/^(?:what about|on|for)?\s*(\d{1,2})\s*$/);
-  if (singleDayMatch) {
-    const day = Number(singleDayMatch[1]);
-    const base = session.appointmentDate
-      ? new Date(`${session.appointmentDate}T00:00:00`)
-      : today;
-    if (day >= 1 && day <= 31) {
-      return chatbotDateFromMonthDay(base.getMonth(), day, today);
-    }
-  }
-
-  if (lower.includes("day after tomorrow")) {
-    const date = new Date(today);
-    date.setDate(date.getDate() + 2);
-    return chatbotToISODate(date);
-  }
-
-  if (lower.includes("tomorrow")) {
-    const date = new Date(today);
-    date.setDate(date.getDate() + 1);
-    return chatbotToISODate(date);
-  }
-
-  if (lower.includes("today")) {
-    return chatbotToISODate(today);
-  }
-
-  const isoMatch = lower.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
-  if (isoMatch) {
-    const [, year, month, day] = isoMatch;
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  }
-
-  const slashMatch = lower.match(/\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b/);
-  if (slashMatch) {
-    const [, month, day, year] = slashMatch;
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  }
-
-  const monthPattern = Object.keys(chatbotMonthNames).join("|");
-  const dayPattern =
-    "\\d{1,2}|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty(?:\\s|-)?one|twenty(?:\\s|-)?two|twenty(?:\\s|-)?three|twenty(?:\\s|-)?four|twenty(?:\\s|-)?five|twenty(?:\\s|-)?six|twenty(?:\\s|-)?seven|twenty(?:\\s|-)?eight|twenty(?:\\s|-)?nine|thirtieth|thirty|thirty(?:\\s|-)?first";
-  const monthFirstMatch = lower.match(
-    new RegExp(`\\b(${monthPattern})\\s+(${dayPattern})(?:\\s+20\\d{2})?\\b`),
-  );
-  if (monthFirstMatch) {
-    const month = chatbotMonthNames[monthFirstMatch[1]];
-    const day = parseChatbotDayNumber(monthFirstMatch[2]);
-    if (month != null && day) return chatbotDateFromMonthDay(month, day, today);
-  }
-
-  const dayFirstMatch = lower.match(
-    new RegExp(`\\b(${dayPattern})\\s+(${monthPattern})(?:\\s+20\\d{2})?\\b`),
-  );
-  if (dayFirstMatch) {
-    const day = parseChatbotDayNumber(dayFirstMatch[1]);
-    const month = chatbotMonthNames[dayFirstMatch[2]];
-    if (month != null && day) return chatbotDateFromMonthDay(month, day, today);
-  }
-
-  const weekdayMatch = lower.match(
-    /\b(next\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)\b/,
-  );
-  if (weekdayMatch) {
-    const weekday = chatbotWeekdays[weekdayMatch[2]];
-    if (weekday != null) {
-      const date = new Date(today);
-      let daysAhead = (weekday - today.getDay() + 7) % 7;
-      if (daysAhead === 0 || weekdayMatch[1]) daysAhead += 7;
-      date.setDate(date.getDate() + daysAhead);
-      return chatbotToISODate(date);
-    }
-  }
-
-  return null;
-};
-
-const timeToMinutes = (time = "") => {
-  const lower = String(time).toLowerCase();
-  const match =
-    lower.match(
-      /\b(?:at|around|about|by)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/,
-    ) || lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
-  if (!match) return null;
-
-  let hours = Number(match[1]);
-  const minutes = Number(match[2] || 0);
-  const period = match[3];
-
-  if (period === "pm" && hours < 12) hours += 12;
-  if (period === "am" && hours === 12) hours = 0;
-  if (hours > 23 || minutes > 59) return null;
-
-  return hours * 60 + minutes;
-};
-
-const parseRequestedTime = (message = "") => {
-  const lower = message.toLowerCase();
-  if (lower.includes("morning")) return 9 * 60;
-  if (lower.includes("afternoon")) return 13 * 60;
-  if (lower.includes("evening")) return 17 * 60;
-  return timeToMinutes(lower);
-};
-
-const parseVisitType = (message = "") => {
-  const lower = message.toLowerCase();
-  if (/follow[\s-]?up|recheck|review/.test(lower)) return "Follow-up";
-  if (/new|first|symptom|problem|issue|pain|fever|cough/.test(lower)) {
-    return "New Symptoms";
-  }
-  return "General Consultation";
-};
-
-const addChatbotMinutes = (time24, minutesToAdd) => {
-  const [hours, minutes] = String(time24).slice(0, 5).split(":").map(Number);
-  const date = new Date();
-  date.setHours(hours, minutes + minutesToAdd, 0, 0);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(
-    date.getMinutes(),
-  ).padStart(2, "0")}:00`;
-};
-
-const buildChatbotSlots = (schedules = [], bookedSlots = []) => {
-  const bookedSet = new Set(
-    bookedSlots.map((slot) => `${slot.start_time}-${slot.end_time}`),
-  );
-  const slots = [];
-
-  schedules.forEach((schedule) => {
-    const duration = Number(schedule.slot_duration_minutes) || 30;
-    let cursor = String(schedule.start_time || "").slice(0, 5);
-    const endBound = String(schedule.end_time || "").slice(0, 5);
-
-    while (cursor && endBound && cursor < endBound) {
-      const endTime = addChatbotMinutes(cursor, duration).slice(0, 5);
-      if (endTime > endBound) break;
-
-      const start_time = `${cursor}:00`;
-      const end_time = `${endTime}:00`;
-      if (!bookedSet.has(`${start_time}-${end_time}`)) {
-        slots.push({
-          schedule_id: schedule.id,
-          hospital_id: schedule.hospital_id || null,
-          start_time,
-          end_time,
-          display: `${cursor} - ${endTime}`,
-        });
-      }
-      cursor = endTime;
-    }
-  });
-
-  return slots;
-};
-
-const formatChatbotDate = (isoDate) =>
-  new Date(`${isoDate}T00:00:00`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-
-const findChatbotDoctor = async (message = "") => {
-  const searchWords = normalizeChatbotSearchMessage(message)
-    .split(/\s+/)
-    .filter((word) => word.length > 2)
-    .filter((word) => !chatbotStopWords.has(word));
-
-  if (!searchWords.length) return null;
-
-  const values = searchWords.map((word) => `%${word}%`);
-  const conditions = values
-    .map(
-      (_, index) => `
-        up.first_name ILIKE $${index + 1}
-        OR up.last_name ILIKE $${index + 1}
-        OR s.name ILIKE $${index + 1}
-        OR d.bio ILIKE $${index + 1}
-      `,
-    )
-    .join(" OR ");
-
-  const result = await pool.query(
-    `
-      SELECT
-        d.id,
-        d.consultation_fee,
-        d.average_rating,
-        d.total_reviews,
-        d.bio,
-        u.email,
-        up.first_name,
-        up.last_name,
-        s.name AS specialization_name
-      FROM doctors d
-      JOIN users u ON u.id = d.user_id
-      LEFT JOIN user_profiles up ON up.user_id = d.user_id
-      LEFT JOIN specializations s ON s.id = d.specialization_id
-      WHERE u.is_active = TRUE
-        AND (${conditions})
-      ORDER BY d.average_rating DESC, d.id ASC
-      LIMIT 30
-    `,
-    values,
-  );
-
-  const scored = result.rows
-    .map((doctor) => {
-      const first = String(doctor.first_name || "").toLowerCase();
-      const last = String(doctor.last_name || "").toLowerCase();
-      const specialty = String(doctor.specialization_name || "").toLowerCase();
-      const bio = String(doctor.bio || "").toLowerCase();
-      let score = 0;
-
-      searchWords.forEach((word) => {
-        if (first === word) score += 8;
-        else if (first.includes(word)) score += 4;
-        if (last === word) score += 6;
-        else if (last.includes(word)) score += 3;
-        if (specialty.includes(word)) score += 2;
-        if (bio.includes(word)) score += 1;
-      });
-
-      const nameTokens = [first, last].filter(Boolean);
-      const allNameWordsMatched =
-        searchWords.length >= 2 &&
-        searchWords.every((word) =>
-          nameTokens.some((token) => token === word || token.includes(word)),
-        );
-      if (allNameWordsMatched) score += 20;
-
-      return { doctor, score };
-    })
-    .filter((item) => item.score > 0)
-    .sort(
-      (a, b) =>
-        b.score - a.score ||
-        Number(b.doctor.average_rating || 0) -
-          Number(a.doctor.average_rating || 0) ||
-        Number(a.doctor.id) - Number(b.doctor.id),
-    );
-
-  return scored[0]?.doctor || null;
-};
-
-const getChatbotAvailableDates = async (
-  doctorId,
-  startIsoDate = null,
-  days = 45,
-) => {
-  const start = startIsoDate
-    ? new Date(`${startIsoDate}T00:00:00`)
-    : new Date();
-  start.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (start < today) start.setTime(today.getTime());
-
-  const available = [];
-  for (let offset = 0; offset < days && available.length < 6; offset += 1) {
-    const date = new Date(start);
-    date.setDate(start.getDate() + offset);
-    const isoDate = chatbotToISODate(date);
-    const schedules = await doctorService.getAvailableSchedules(
-      doctorId,
-      isoDate,
-    );
-    const slots = buildChatbotSlots(
-      schedules.schedules || [],
-      schedules.booked_slots || [],
-    );
-    if (slots.length) {
-      available.push({
-        date: isoDate,
-        label: formatChatbotDate(isoDate),
-        slots: slots.slice(0, 4),
-      });
-    }
-  }
-
-  return available;
-};
-
-const getTopChatbotDoctors = async () => {
-  const result = await pool.query(
-    `
-      SELECT
-        d.id,
-        d.consultation_fee,
-        d.average_rating,
-        d.total_reviews,
-        up.first_name,
-        up.last_name,
-        s.name AS specialization_name
-      FROM doctors d
-      JOIN users u ON u.id = d.user_id
-      LEFT JOIN user_profiles up ON up.user_id = d.user_id
-      LEFT JOIN specializations s ON s.id = d.specialization_id
-      WHERE u.is_active = TRUE
-      ORDER BY d.average_rating DESC, d.id ASC
-      LIMIT 5
-    `,
-  );
-
-  return result.rows;
-};
-
-const getSuggestedChatbotDoctors = async (message = "") => {
-  const matchedDoctor = await findChatbotDoctor(message);
-  const topDoctors = await getTopChatbotDoctors();
-
-  const suggestions = [matchedDoctor, ...topDoctors]
-    .filter(Boolean)
-    .filter(
-      (doctor, index, list) =>
-        list.findIndex((item) => Number(item.id) === Number(doctor.id)) ===
-        index,
-    )
-    .slice(0, 3);
-
-  if (!suggestions.length) {
-    return {
-      reply: "I could not find any doctors in the database right now.",
-      isNepali: false,
-    };
-  }
-
-  return {
-    reply: `Here are some doctors you can consider: ${suggestions
-      .map(
-        (doctor) =>
-          `${formatDoctorName(doctor)} (${doctor.specialization_name || "General"}, rating ${Number(doctor.average_rating || 0).toFixed(1)})`,
-      )
-      .join(", ")}. Tell me which one you want, and I will help you book it.`,
-    isNepali: false,
-  };
-};
-
-const getConversationalChatbotReply = async (message = "") => {
-  const lower = String(message).toLowerCase().trim();
-
-  if (/^(hi|hello|hey|namaste|namaskar)\b/.test(lower)) {
-    return "Hi! I am here with you. You can ask me about the app, doctors, or appointments whenever you want.";
-  }
-
-  if (/\b(thanks|thank you|dhanyabad)\b/.test(lower)) {
-    return "You are welcome. I am here if you need anything else.";
-  }
-
-  try {
-    const response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "llama3",
-        prompt: `
-You are a friendly assistant inside a doctor appointment system in Nepal.
-Reply conversationally in 1-3 short sentences.
-Do not claim an appointment is booked.
-Do not invent doctor names, availability, emails, or payments.
-If the user asks to book, find doctors, or check availability, tell them you can help with that.
-
-User: ${message}
-Assistant:`,
-        stream: false,
-        options: {
-          temperature: 0.5,
-          num_predict: 100,
-        },
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const reply = String(data.response || "").trim();
-      if (reply) return reply;
-    }
-  } catch {
-    // Fall through to a safe deterministic reply when the local model is not running.
-  }
-
-  return "I am here. You can chat with me normally, or ask me to help prepare an appointment when you are ready.";
-};
-
-const toChatbotDoctorPayload = (doctor) => ({
-  id: doctor.id,
-  name: formatDoctorName(doctor),
-  specialty: doctor.specialization_name || "General consultation",
-  consultationFee: doctor.consultation_fee,
-  consultation_fee: doctor.consultation_fee,
-});
-
-const buildChatbotBookingAction = async (session) => {
-  const doctor = session.doctor;
-  const appointmentDate = session.appointmentDate;
-
-  if (
-    !doctor ||
-    !appointmentDate ||
-    session.requestedTime == null ||
-    !session.description
-  ) {
-    return null;
-  }
-
-  const schedules = await doctorService.getAvailableSchedules(
-    doctor.id,
-    appointmentDate,
-  );
-  const slots = buildChatbotSlots(
-    schedules.schedules || [],
-    schedules.booked_slots || [],
-  );
-  if (!slots.length) {
-    return {
-      type: "no_slots",
-      doctor,
-      appointmentDate,
-    };
-  }
-
-  const requestedTime = session.requestedTime;
-  const slot =
-    requestedTime == null
-      ? slots[0]
-      : slots.find((item) => timeToMinutes(item.start_time) >= requestedTime) ||
-        slots[0];
-
-  const doctorPayload = toChatbotDoctorPayload(doctor);
-
-  return {
-    type: "prefill_booking",
-    label: "Continue booking",
-    doctor: doctorPayload,
-    bookingDraft: {
-      doctor: doctorPayload,
-      appointment_date: appointmentDate,
-      slot,
-      visitType: session.visitType || "General Consultation",
-      description: session.description,
-    },
-  };
-};
-
-const getChatbotReply = async ({
-  session,
-  action,
-  noSlots,
-  wantsAvailability,
-  availableDates,
-}) => {
-  if (wantsAvailability && session.doctor) {
-    if (!availableDates.length) {
-      return `I could not find open dates for ${formatDoctorName(session.doctor)} in the next few weeks.`;
-    }
-    return `Available dates for ${formatDoctorName(session.doctor)} include ${availableDates
-      .map((item) => item.label)
-      .join(", ")}. Which one should I fill?`;
-  }
-
-  if (action?.type === "prefill_booking") {
-    return `I filled the doctor, date, time, and visit details from your instructions. Continue booking to review the payment step yourself.`;
-  }
-
-  if (noSlots) {
-    if (availableDates.length) {
-      return `No open slots on ${formatChatbotDate(session.appointmentDate)} for ${formatDoctorName(session.doctor)}. Available dates include ${availableDates
-        .map((item) => item.label)
-        .join(", ")}. Which one should I fill?`;
-    }
-    return `I found ${formatDoctorName(session.doctor)}, but there are no open slots on ${session.appointmentDate}. Please tell me another date.`;
-  }
-
-  if (!session.doctor) {
-    const doctors = await getTopChatbotDoctors();
-    if (!doctors.length) {
-      return "I could not find any doctors in the database right now.";
-    }
-    return `Which doctor should I use? Available doctors include ${doctors
-      .map(
-        (doctor) =>
-          `${formatDoctorName(doctor)} (${doctor.specialization_name || "General"})`,
-      )
-      .join(", ")}.`;
-  }
-
-  if (!session.appointmentDate) {
-    return `I found ${formatDoctorName(session.doctor)}. What date should I fill for the appointment?`;
-  }
-
-  if (session.requestedTime == null) {
-    return `What time should I fill for ${session.appointmentDate}?`;
-  }
-
-  if (!session.description) {
-    return "What should I fill in the visit details/reason field?";
-  }
-
-  return "I have the doctor, date, time, and details. Continue booking to review the payment step yourself.";
-};
-
-const chatbotController = {
-  chat: asyncHandler(async (req, res) => {
-    const message = String(req.body?.message || "").trim();
-    if (!message) {
-      return sendError(res, 400, "Message is required");
-    }
-
-    const sessionKey = String(req.body?.userId || req.ip || "anonymous");
-    const lower = message.toLowerCase();
-    const resetRequested = /\b(reset|start over|new booking|clear)\b/.test(
-      lower,
-    );
-    const existingSession = chatbotSessions.get(sessionKey) || {};
-    const bookingIntent = isChatbotBookingIntent(message);
-    const suggestionIntent = isChatbotSuggestionIntent(message);
-
-    let activeSession = resetRequested ? {} : { ...existingSession };
-
-    if (resetRequested) {
-      chatbotSessions.delete(sessionKey);
-    }
-
-    if (resetRequested) {
-      const reply = "Done, I cleared the current booking conversation.";
-      chatbotHistory.push(`User: ${message}`);
-      chatbotHistory.push(`Assistant: ${reply}`);
-
-      if (chatbotHistory.length > 12) {
-        chatbotHistory = chatbotHistory.slice(-12);
-      }
-
-      return sendSuccess(res, 200, "Chatbot response generated successfully", {
-        reply,
-        isNepali: /[\u0900-\u097F]/.test(reply),
-        action: null,
-      });
-    }
-
-    if (!bookingIntent && !suggestionIntent) {
-      activeSession = {};
-      chatbotSessions.delete(sessionKey);
-
-      const reply = await getConversationalChatbotReply(message);
-      chatbotHistory.push(`User: ${message}`);
-      chatbotHistory.push(`Assistant: ${reply}`);
-
-      if (chatbotHistory.length > 12) {
-        chatbotHistory = chatbotHistory.slice(-12);
-      }
-
-      return sendSuccess(res, 200, "Chatbot response generated successfully", {
-        reply,
-        isNepali: /[\u0900-\u097F]/.test(reply),
-        action: null,
-      });
-    }
-
-    if (suggestionIntent && !bookingIntent) {
-      const suggestionReply = await getSuggestedChatbotDoctors(message);
-      chatbotHistory.push(`User: ${message}`);
-      chatbotHistory.push(`Assistant: ${suggestionReply.reply}`);
-
-      if (chatbotHistory.length > 12) {
-        chatbotHistory = chatbotHistory.slice(-12);
-      }
-
-      chatbotSessions.delete(sessionKey);
-
-      return sendSuccess(res, 200, "Chatbot response generated successfully", {
-        reply: suggestionReply.reply,
-        isNepali: suggestionReply.isNepali,
-        action: null,
-      });
-    }
-
-    const doctor = await findChatbotDoctor(message);
-    if (doctor) {
-      activeSession.doctor = doctor;
-    }
-
-    const appointmentDate = parseChatbotDate(message, activeSession);
-    if (appointmentDate) {
-      activeSession.appointmentDate = appointmentDate;
-    }
-
-    const requestedTime = parseRequestedTime(message);
-    if (requestedTime != null) {
-      activeSession.requestedTime = requestedTime;
-    }
-
-    const looksLikeDetails =
-      activeSession.doctor &&
-      activeSession.appointmentDate &&
-      activeSession.requestedTime != null &&
-      !doctor &&
-      !appointmentDate &&
-      requestedTime == null;
-    if (
-      looksLikeDetails ||
-      /\b(reason|details|fill|symptom|pain|fever|cough|checkup|follow)\b/.test(
-        lower,
-      )
-    ) {
-      activeSession.description = message;
-      activeSession.visitType = parseVisitType(message);
-    }
-
-    chatbotHistory.push(`User: ${message}`);
-    const wantsAvailability =
-      /\b(available|availability|open dates?|which dates?|what dates?|dates available|slots?)\b/.test(
-        lower,
-      );
-    const action = await buildChatbotBookingAction(activeSession);
-    const noSlots = action?.type === "no_slots";
-    const availableDates =
-      activeSession.doctor && (wantsAvailability || noSlots)
-        ? await getChatbotAvailableDates(
-            activeSession.doctor.id,
-            activeSession.appointmentDate,
-          )
-        : [];
-    const reply = await getChatbotReply({
-      session: activeSession,
-      action,
-      noSlots,
-      wantsAvailability,
-      availableDates,
-    });
-    chatbotHistory.push(`Assistant: ${reply}`);
-
-    if (chatbotHistory.length > 12) {
-      chatbotHistory = chatbotHistory.slice(-12);
-    }
-
-    if (action?.type === "prefill_booking") {
-      chatbotSessions.delete(sessionKey);
-    } else if (Object.keys(activeSession).length) {
-      chatbotSessions.set(sessionKey, activeSession);
-    } else {
-      chatbotSessions.delete(sessionKey);
-    }
-
-    sendSuccess(res, 200, "Chatbot response generated successfully", {
-      reply,
-      isNepali: /[\u0900-\u097F]/.test(reply),
-      action: action?.type === "prefill_booking" ? action : null,
-    });
-  }),
 };
 
 const notificationService = {
@@ -2910,24 +1474,6 @@ const reviewService = {
     try {
       await client.query("BEGIN");
 
-      const appointmentResult = await client.query(
-        `
-          SELECT id
-          FROM appointments
-          WHERE id = $1
-            AND user_id = $2
-            AND doctor_id = $3
-            AND status <> 'cancelled'
-        `,
-        [appointment_id, user_id, doctor_id],
-      );
-
-      if (!appointmentResult.rowCount) {
-        throw new Error(
-          "Feedback can only be submitted for your own booked appointment",
-        );
-      }
-
       const reviewResult = await client.query(
         `
 					INSERT INTO doctor_reviews (doctor_id, user_id, appointment_id, rating, review_text)
@@ -2967,46 +1513,6 @@ const reviewService = {
     } finally {
       client.release();
     }
-  },
-
-  getDoctorReviews: async ({ doctorId, page, limit, offset }) => {
-    const query = `
-			SELECT
-				r.id,
-				r.doctor_id,
-				r.user_id,
-				r.appointment_id,
-				r.rating,
-				r.review_text,
-				r.created_at,
-				up.first_name,
-				up.last_name
-			FROM doctor_reviews r
-			LEFT JOIN user_profiles up ON up.user_id = r.user_id
-			WHERE r.doctor_id = $1
-			ORDER BY r.created_at DESC
-			LIMIT $2 OFFSET $3
-		`;
-
-    const countQuery = `
-			SELECT COUNT(*)::int AS total
-			FROM doctor_reviews
-			WHERE doctor_id = $1
-		`;
-
-    const [listResult, countResult] = await Promise.all([
-      pool.query(query, [doctorId, limit, offset]),
-      pool.query(countQuery, [doctorId]),
-    ]);
-
-    const total = countResult.rows[0]?.total || 0;
-    return {
-      page,
-      limit,
-      total,
-      total_pages: Math.ceil(total / limit) || 1,
-      items: listResult.rows,
-    };
   },
 };
 
@@ -3160,6 +1666,7 @@ const doctorController = {
     });
   }),
 
+  // ── DOCTOR SITE CONTROLLERS ──
   getDoctorAppointments: asyncHandler(async (req, res) => {
     const doctorId = normalizeNumericId(req.params.doctorId);
     if (!doctorId) return sendError(res, 400, "Valid doctorId is required");
@@ -3203,7 +1710,6 @@ const doctorController = {
       hospital_id,
       slot_duration_minutes,
     } = req.body;
-
     if (!type || !["day", "date"].includes(type))
       return sendError(res, 400, "type must be 'day' or 'date'");
     if (type === "day" && (day_of_week === undefined || day_of_week === null))
@@ -3217,8 +1723,8 @@ const doctorController = {
       doctorId,
       hospitalId: hospital_id ? normalizeNumericId(hospital_id) : null,
       type,
-      day_of_week: type === "day" ? parseInt(day_of_week) : null,
-      specific_date: type === "date" ? specific_date : null,
+      day_of_week,
+      specific_date,
       start_time,
       end_time,
       max_patients: max_patients || 1,
@@ -3259,20 +1765,6 @@ doctorController.addDoctor = asyncHandler(async (req, res) => {
   const doctor = await doctorService.addDoctor(req.body);
 
   sendSuccess(res, 201, "Doctor created successfully", doctor);
-});
-
-doctorController.updateDoctor = asyncHandler(async (req, res) => {
-  const doctorId = normalizeNumericId(req.params.doctorId);
-  if (!doctorId) {
-    return sendError(res, 400, "Valid doctorId is required");
-  }
-
-  const doctor = await doctorService.updateDoctorById(doctorId, req.body || {});
-  if (!doctor) {
-    return sendError(res, 404, "Doctor not found");
-  }
-
-  sendSuccess(res, 200, "Doctor updated successfully", doctor);
 });
 
 const appointmentController = {
@@ -3340,97 +1832,6 @@ const appointmentController = {
     sendSuccess(res, 200, "Appointment cancelled successfully", appointment);
   }),
 
-  cancelAppointmentByDoctor: asyncHandler(async (req, res) => {
-    const doctorId = normalizeNumericId(req.params.doctorId);
-    const appointmentId = normalizeNumericId(req.params.appointmentId);
-
-    if (!doctorId || !appointmentId) {
-      return sendError(
-        res,
-        400,
-        "Valid doctorId and appointmentId are required",
-      );
-    }
-
-    const appointment = await appointmentService.cancelAppointmentByDoctor({
-      appointmentId,
-      doctorId,
-    });
-
-    if (!appointment) {
-      return sendError(
-        res,
-        404,
-        "Active appointment not found for this doctor",
-      );
-    }
-
-    if (appointment.user_id) {
-      await createNotification(
-        appointment.user_id,
-        "Appointment Cancelled",
-        "Your appointment has been cancelled by the doctor.",
-        "appointment",
-        { appointment_id: appointmentId },
-      );
-    }
-
-    const doctorUserResult = await pool.query(
-      `SELECT user_id FROM doctors WHERE id = $1`,
-      [doctorId],
-    );
-    if (doctorUserResult.rowCount && doctorUserResult.rows[0]?.user_id) {
-      await createNotification(
-        doctorUserResult.rows[0].user_id,
-        "Appointment Cancelled",
-        "You cancelled an appointment successfully.",
-        "appointment",
-        { appointment_id: appointmentId, role: "doctor" },
-      );
-    }
-
-    sendSuccess(res, 200, "Appointment cancelled successfully", appointment);
-  }),
-
-  markAppointmentCompletedByDoctor: asyncHandler(async (req, res) => {
-    const doctorId = normalizeNumericId(req.params.doctorId);
-    const appointmentId = normalizeNumericId(req.params.appointmentId);
-
-    if (!doctorId || !appointmentId) {
-      return sendError(
-        res,
-        400,
-        "Valid doctorId and appointmentId are required",
-      );
-    }
-
-    const appointment =
-      await appointmentService.markAppointmentCompletedByDoctor({
-        appointmentId,
-        doctorId,
-      });
-
-    if (!appointment) {
-      return sendError(
-        res,
-        404,
-        "Active appointment not found for this doctor",
-      );
-    }
-
-    if (appointment.user_id) {
-      await createNotification(
-        appointment.user_id,
-        "Appointment Completed",
-        "Your appointment has been marked as completed by the doctor.",
-        "appointment",
-        { appointment_id: appointmentId },
-      );
-    }
-
-    sendSuccess(res, 200, "Appointment marked as completed", appointment);
-  }),
-
   rescheduleAppointment: asyncHandler(async (req, res) => {
     const appointmentId = normalizeNumericId(req.params.appointmentId);
     const userId = normalizeNumericId(req.body.user_id);
@@ -3452,36 +1853,6 @@ const appointmentController = {
     const appointment = await appointmentService.rescheduleAppointment({
       appointmentId,
       userId,
-      new_appointment_date: req.body.new_appointment_date,
-      new_start_time: req.body.new_start_time,
-      new_end_time: req.body.new_end_time,
-      reason: req.body.reason,
-    });
-
-    sendSuccess(res, 200, "Appointment rescheduled successfully", appointment);
-  }),
-
-  rescheduleAppointmentByDoctor: asyncHandler(async (req, res) => {
-    const doctorId = normalizeNumericId(req.params.doctorId);
-    const appointmentId = normalizeNumericId(req.params.appointmentId);
-
-    if (
-      !doctorId ||
-      !appointmentId ||
-      !req.body.new_appointment_date ||
-      !req.body.new_start_time ||
-      !req.body.new_end_time
-    ) {
-      return sendError(
-        res,
-        400,
-        "doctorId, appointmentId, new_appointment_date, new_start_time and new_end_time are required",
-      );
-    }
-
-    const appointment = await appointmentService.rescheduleAppointmentByDoctor({
-      appointmentId,
-      doctorId,
       new_appointment_date: req.body.new_appointment_date,
       new_start_time: req.body.new_start_time,
       new_end_time: req.body.new_end_time,
@@ -3526,43 +1897,9 @@ const appointmentController = {
 
     sendSuccess(res, 200, "Completed appointments fetched successfully", data);
   }),
-
-  getAppointmentById: asyncHandler(async (req, res) => {
-    const appointmentId = normalizeNumericId(req.params.appointmentId);
-    if (!appointmentId) {
-      return sendError(res, 400, "Valid appointmentId is required");
-    }
-
-    const appointment =
-      await appointmentService.getAppointmentById(appointmentId);
-    if (!appointment) {
-      return sendError(res, 404, "Appointment not found");
-    }
-
-    sendSuccess(res, 200, "Appointment fetched successfully", appointment);
-  }),
 };
 
 const medicalController = {
-  getMedicalHistory: asyncHandler(async (req, res) => {
-    const userId = normalizeNumericId(req.params.userId);
-    if (!userId) {
-      return sendError(res, 400, "Valid userId is required");
-    }
-
-    const medicalHistory = await medicalService.getMedicalHistory(userId);
-    if (!medicalHistory) {
-      return sendError(res, 404, "Medical history not found");
-    }
-
-    sendSuccess(
-      res,
-      200,
-      "Medical history fetched successfully",
-      medicalHistory,
-    );
-  }),
-
   addMedicalHistory: asyncHandler(async (req, res) => {
     const userId = normalizeNumericId(req.body.user_id);
     if (!userId) {
@@ -3771,27 +2108,11 @@ const reviewController = {
     const review = await reviewService.addDoctorReview(payload);
     sendSuccess(res, 201, "Doctor review added successfully", review);
   }),
-
-  getDoctorReviews: asyncHandler(async (req, res) => {
-    const doctorId = normalizeNumericId(req.params.doctorId);
-    if (!doctorId) {
-      return sendError(res, 400, "Valid doctorId is required");
-    }
-
-    const { page, limit, offset } = parsePagination(req.query);
-    const data = await reviewService.getDoctorReviews({
-      doctorId,
-      page,
-      limit,
-      offset,
-    });
-
-    sendSuccess(res, 200, "Doctor reviews fetched successfully", data);
-  }),
 };
 
 // ── ADMIN SERVICE ──
 const adminService = {
+  // Dashboard analytics
   getDashboardStats: async () => {
     const today = new Date().toISOString().split("T")[0];
 
@@ -3804,8 +2125,6 @@ const adminService = {
       newUsersThisMonthResult,
       topDoctorsResult,
       revenueResult,
-      todayScheduleResult,
-      appointmentOverviewResult,
     ] = await Promise.all([
       pool.query(
         `SELECT COUNT(*)::int AS total FROM users WHERE role = 'user'`,
@@ -3841,41 +2160,9 @@ const adminService = {
            COALESCE(SUM(CASE WHEN DATE_TRUNC('month',created_at)=DATE_TRUNC('month',NOW()) THEN amount END),0)::numeric AS revenue_this_month
          FROM payments WHERE status='paid'`,
       ),
-      pool.query(
-        `SELECT
-           a.id,
-           a.appointment_date::text AS appointment_date,
-           a.start_time::text AS start_time,
-           a.end_time::text AS end_time,
-           a.status,
-           up.first_name AS patient_first_name,
-           up.last_name AS patient_last_name,
-           du.first_name AS doctor_first_name,
-           du.last_name AS doctor_last_name,
-           s.name AS specialization_name
-         FROM appointments a
-         JOIN users u ON u.id = a.user_id
-         LEFT JOIN user_profiles up ON up.user_id = u.id
-         JOIN doctors d ON d.id = a.doctor_id
-         LEFT JOIN user_profiles du ON du.user_id = d.user_id
-         LEFT JOIN specializations s ON s.id = d.specialization_id
-         WHERE a.appointment_date = $1
-         ORDER BY a.start_time ASC`,
-        [today],
-      ),
-      pool.query(
-        `SELECT
-           TO_CHAR(a.appointment_date, 'YYYY-MM-DD') AS day,
-           COUNT(*) FILTER (WHERE a.status IN ('pending', 'confirmed', 'rescheduled'))::int AS scheduled,
-           COUNT(*) FILTER (WHERE a.status = 'completed')::int AS completed,
-           COUNT(*) FILTER (WHERE a.status = 'cancelled')::int AS cancelled
-         FROM appointments a
-         WHERE a.appointment_date >= CURRENT_DATE - INTERVAL '6 days'
-         GROUP BY day
-         ORDER BY day ASC`,
-      ),
     ]);
 
+    // Appointments per month (last 6 months)
     const monthlyResult = await pool.query(
       `SELECT TO_CHAR(appointment_date,'YYYY-MM') AS month, COUNT(*)::int AS count
        FROM appointments
@@ -3898,162 +2185,10 @@ const adminService = {
       appointments_by_status: appointmentsByStatusResult.rows,
       monthly_appointments: monthlyResult.rows,
       top_doctors: topDoctorsResult.rows,
-      today_schedule: todayScheduleResult.rows,
-      appointments_overview: appointmentOverviewResult.rows,
     };
   },
 
-  getAllUsersAdmin: async ({ search, role, page, limit, offset }) => {
-    const filters = [];
-    const values = [];
-
-    if (role && ["user", "doctor", "admin"].includes(role)) {
-      values.push(role);
-      filters.push(`u.role = $${values.length}`);
-    }
-
-    if (search) {
-      values.push(`%${search}%`);
-      filters.push(
-        `(u.email ILIKE $${values.length} OR COALESCE(up.first_name, '') ILIKE $${values.length} OR COALESCE(up.last_name, '') ILIKE $${values.length})`,
-      );
-    }
-
-    const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
-    values.push(limit);
-    values.push(offset);
-
-    const listQuery = `
-      SELECT
-        u.id AS user_id,
-        u.email,
-        u.role,
-        u.is_active,
-        u.created_at,
-        up.first_name,
-        up.last_name,
-        up.phone,
-        d.id AS doctor_id,
-        d.specialization_id,
-        d.license_number,
-        d.years_of_experience,
-        d.consultation_fee,
-        s.name AS specialization_name
-      FROM users u
-      LEFT JOIN user_profiles up ON up.user_id = u.id
-      LEFT JOIN doctors d ON d.user_id = u.id
-      LEFT JOIN specializations s ON s.id = d.specialization_id
-      ${whereClause}
-      ORDER BY u.created_at DESC
-      LIMIT $${values.length - 1}
-      OFFSET $${values.length}`;
-
-    const countValues = values.slice(0, values.length - 2);
-    const countQuery = `SELECT COUNT(*)::int AS total FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id LEFT JOIN doctors d ON d.user_id = u.id ${whereClause}`;
-
-    const [listResult, countResult, summaryResult] = await Promise.all([
-      pool.query(listQuery, values),
-      pool.query(countQuery, countValues),
-      Promise.all([
-        pool.query(
-          `SELECT COUNT(*)::int AS total FROM users WHERE role = 'user'`,
-        ),
-        pool.query(
-          `SELECT COUNT(*)::int AS total FROM users WHERE role = 'doctor'`,
-        ),
-        pool.query(`SELECT COUNT(*)::int AS total FROM users`),
-      ]),
-    ]);
-
-    const total = countResult.rows[0]?.total || 0;
-    const [patientsSummary, doctorsSummary, usersSummary] = summaryResult;
-
-    return {
-      page,
-      limit,
-      total,
-      total_pages: Math.ceil(total / limit) || 1,
-      summary: {
-        total_users: usersSummary.rows[0]?.total || 0,
-        doctors: doctorsSummary.rows[0]?.total || 0,
-        patients: patientsSummary.rows[0]?.total || 0,
-      },
-      items: listResult.rows,
-    };
-  },
-
-  getAllAppointmentsAdmin: async ({ search, status, page, limit, offset }) => {
-    const filters = [];
-    const values = [];
-
-    if (status) {
-      values.push(status);
-      filters.push(`a.status = $${values.length}`);
-    }
-
-    if (search) {
-      values.push(`%${search}%`);
-      filters.push(
-        `(up.first_name ILIKE $${values.length} OR up.last_name ILIKE $${values.length} OR du.first_name ILIKE $${values.length} OR du.last_name ILIKE $${values.length} OR u.email ILIKE $${values.length})`,
-      );
-    }
-
-    const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
-    values.push(limit);
-    values.push(offset);
-
-    const listQuery = `
-      SELECT
-        a.id,
-        a.appointment_date::text AS appointment_date,
-        a.start_time::text AS start_time,
-        a.end_time::text AS end_time,
-        a.status,
-        a.reason,
-        a.created_at,
-        a.updated_at,
-        a.doctor_id,
-        a.user_id,
-        u.email AS patient_email,
-        up.first_name AS patient_first_name,
-        up.last_name AS patient_last_name,
-        up.phone AS patient_phone,
-        du.first_name AS doctor_first_name,
-        du.last_name AS doctor_last_name,
-        d.license_number,
-        s.name AS specialization_name,
-        h.name AS hospital_name
-      FROM appointments a
-      JOIN users u ON u.id = a.user_id
-      LEFT JOIN user_profiles up ON up.user_id = u.id
-      JOIN doctors d ON d.id = a.doctor_id
-      LEFT JOIN user_profiles du ON du.user_id = d.user_id
-      LEFT JOIN specializations s ON s.id = d.specialization_id
-      LEFT JOIN hospitals h ON h.id = a.hospital_id
-      ${whereClause}
-      ORDER BY a.appointment_date DESC, a.start_time DESC
-      LIMIT $${values.length - 1}
-      OFFSET $${values.length}`;
-
-    const countValues = values.slice(0, values.length - 2);
-    const countQuery = `SELECT COUNT(*)::int AS total FROM appointments a JOIN users u ON u.id = a.user_id LEFT JOIN user_profiles up ON up.user_id = u.id JOIN doctors d ON d.id = a.doctor_id LEFT JOIN user_profiles du ON du.user_id = d.user_id ${whereClause}`;
-
-    const [listResult, countResult] = await Promise.all([
-      pool.query(listQuery, values),
-      pool.query(countQuery, countValues),
-    ]);
-
-    const total = countResult.rows[0]?.total || 0;
-
-    return {
-      page,
-      limit,
-      total,
-      total_pages: Math.ceil(total / limit) || 1,
-      items: listResult.rows,
-    };
-  },
-
+  // Get all patients (users with role='user')
   getAllPatients: async ({ search, page, limit, offset }) => {
     const values = [];
     let searchClause = "";
@@ -4092,6 +2227,7 @@ const adminService = {
     };
   },
 
+  // Get all doctors with stats
   getAllDoctorsAdmin: async ({
     search,
     specializationId,
@@ -4152,6 +2288,7 @@ const adminService = {
     };
   },
 
+  // Toggle user active/inactive status (soft delete)
   setUserActiveStatus: async (userId, isActive) => {
     const result = await pool.query(
       `UPDATE users SET is_active=$2 WHERE id=$1 RETURNING id, email, role, is_active`,
@@ -4160,6 +2297,7 @@ const adminService = {
     return result.rows[0] || null;
   },
 
+  // Hard delete a user (cascades based on DB FK constraints)
   deleteUser: async (userId) => {
     const result = await pool.query(
       `DELETE FROM users WHERE id=$1 RETURNING id, email, role`,
@@ -4168,6 +2306,7 @@ const adminService = {
     return result.rows[0] || null;
   },
 
+  // Per-doctor analytics: how many patients each doctor sees
   getDoctorPatientAnalytics: async () => {
     const result = await pool.query(
       `SELECT d.id AS doctor_id,
@@ -4223,30 +2362,6 @@ const adminController = {
     sendSuccess(res, 200, "Doctors fetched successfully", data);
   }),
 
-  getAllUsersAdmin: asyncHandler(async (req, res) => {
-    const { page, limit, offset } = parsePagination(req.query);
-    const data = await adminService.getAllUsersAdmin({
-      search: req.query.search || null,
-      role: req.query.role || null,
-      page,
-      limit,
-      offset,
-    });
-    sendSuccess(res, 200, "Users fetched successfully", data);
-  }),
-
-  getAllAppointmentsAdmin: asyncHandler(async (req, res) => {
-    const { page, limit, offset } = parsePagination(req.query);
-    const data = await adminService.getAllAppointmentsAdmin({
-      search: req.query.search || null,
-      status: req.query.status || null,
-      page,
-      limit,
-      offset,
-    });
-    sendSuccess(res, 200, "Appointments fetched successfully", data);
-  }),
-
   setUserActiveStatus: asyncHandler(async (req, res) => {
     const userId = normalizeNumericId(req.params.userId);
     if (!userId || typeof req.body.is_active !== "boolean")
@@ -4284,7 +2399,6 @@ const adminController = {
 
 router.post("/auth/register", authController.registerUser);
 router.post("/auth/login", authController.loginUser);
-router.post("/chatbot", chatbotController.chat);
 
 router.post("/profile", profileController.createProfile);
 router.put("/profile/:userId", profileController.updateProfile);
@@ -4344,34 +2458,15 @@ router.get(
   "/doctors/:doctorId/appointments",
   doctorController.getDoctorAppointments,
 );
-router.get(
-  "/doctors/:doctorId/all-schedules",
-  doctorController.getDoctorSchedules,
-);
+router.get("/doctors/:doctorId/schedules", doctorController.getDoctorSchedules);
 router.get("/doctors/:doctorId/patients", doctorController.getDoctorPatients);
 router.post(
   "/doctors/:doctorId/availability",
   doctorController.setAvailability,
 );
 router.get("/doctors/:doctorId/panel", doctorController.getDoctorPanel);
-router.patch(
-  "/doctors/:doctorId/appointments/:appointmentId/cancel",
-  appointmentController.cancelAppointmentByDoctor,
-);
-router.patch(
-  "/doctors/:doctorId/appointments/:appointmentId/complete",
-  appointmentController.markAppointmentCompletedByDoctor,
-);
-router.patch(
-  "/doctors/:doctorId/appointments/:appointmentId/reschedule",
-  appointmentController.rescheduleAppointmentByDoctor,
-);
 
 router.post("/appointments", appointmentController.bookAppointment);
-router.get(
-  "/appointments/:appointmentId",
-  appointmentController.getAppointmentById,
-);
 router.patch(
   "/appointments/:appointmentId/cancel",
   appointmentController.cancelAppointment,
@@ -4390,7 +2485,6 @@ router.get(
 );
 
 router.post("/medical-history", medicalController.addMedicalHistory);
-router.get("/medical-history/:userId", medicalController.getMedicalHistory);
 router.put("/medical-history/:userId", medicalController.updateMedicalHistory);
 router.patch(
   "/medical-history/:userId/visibility",
@@ -4410,16 +2504,12 @@ router.patch(
 );
 
 router.post("/reviews", reviewController.addDoctorReview);
-router.get("/doctors/:doctorId/reviews", reviewController.getDoctorReviews);
 router.post("/doctors", doctorController.addDoctor);
-router.put("/doctors/:doctorId", doctorController.updateDoctor);
 
 // ── Admin Routes ──
 router.get("/admin/dashboard", adminController.getDashboardStats);
 router.get("/admin/patients", adminController.getAllPatients);
 router.get("/admin/doctors", adminController.getAllDoctorsAdmin);
-router.get("/admin/users", adminController.getAllUsersAdmin);
-router.get("/admin/appointments", adminController.getAllAppointmentsAdmin);
 router.patch(
   "/admin/users/:userId/status",
   adminController.setUserActiveStatus,

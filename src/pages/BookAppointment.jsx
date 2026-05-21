@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -9,22 +9,11 @@ import {
   CreditCard,
   Check,
   Stethoscope,
-  MapPin,
-  Star,
-  RefreshCw,
-  MessageSquare,
-  Activity,
   AlertCircle,
-  FlaskConical,
-  MoreHorizontal,
   ArrowRight,
   ArrowLeft,
-  Banknote,
-  Smartphone,
-  Building2,
 } from "lucide-react";
 
-/* ─────────────── constants ─────────────── */
 const STEPS = [
   { n: 1, label: "Date", Icon: Calendar },
   { n: 2, label: "Time", Icon: Clock },
@@ -32,52 +21,150 @@ const STEPS = [
   { n: 4, label: "Payment", Icon: CreditCard },
 ];
 
-const TIME_SLOTS = [
-  "09:00 AM",
-  "09:30 AM",
-  "10:00 AM",
-  "10:30 AM",
-  "11:00 AM",
-  "11:30 AM",
-  "01:00 PM",
-  "01:30 PM",
-  "02:00 PM",
-  "03:00 PM",
-  "03:30 PM",
-  "04:00 PM",
-];
+const API_BASE = "http://localhost:3000/api";
+const DEFAULT_DOCTOR_IMAGE =
+  "https://images.unsplash.com/photo-1527613426441-4da17471b66d?w=150&h=150&fit=crop&crop=face";
 
-const VISIT_TYPES = [
-  { label: "Follow-up", Icon: RefreshCw },
-  { label: "Consultation", Icon: MessageSquare },
-  { label: "Check-up", Icon: Activity },
-  { label: "Emergency", Icon: AlertCircle },
-  { label: "Lab Results Review", Icon: FlaskConical },
-  { label: "Other", Icon: MoreHorizontal },
-];
+const DEFAULT_DOCTOR = {
+  id: null,
+  name: "Selected doctor",
+  specialty: "General consultation",
+  consultationFee: 0,
+  image: DEFAULT_DOCTOR_IMAGE,
+};
+
+const addMinutes = (time24, minutesToAdd) => {
+  const [hours, minutes] = time24.split(":").map(Number);
+  const date = new Date();
+  date.setHours(hours, minutes + minutesToAdd, 0, 0);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(
+    date.getMinutes(),
+  ).padStart(2, "0")}:00`;
+};
+
+const to12Hour = (time24) => {
+  const [hours, minutes] = time24.split(":").map(Number);
+  const period = hours >= 12 ? "PM" : "AM";
+  const hour12 = ((hours + 11) % 12) + 1;
+  return `${hour12}:${String(minutes).padStart(2, "0")} ${period}`;
+};
+
+const buildSlots = (schedules = [], bookedSlots = []) => {
+  const bookedSet = new Set(
+    bookedSlots.map((slot) => `${slot.start_time}-${slot.end_time}`),
+  );
+  const slots = [];
+
+  schedules.forEach((schedule) => {
+    const duration = Number(schedule.slot_duration_minutes) || 30;
+    let cursor = String(schedule.start_time || "").slice(0, 5);
+    const endBound = String(schedule.end_time || "").slice(0, 5);
+
+    while (cursor && endBound && cursor < endBound) {
+      const endTime = addMinutes(cursor, duration).slice(0, 5);
+      if (endTime > endBound) break;
+
+      const start_time = `${cursor}:00`;
+      const end_time = `${endTime}:00`;
+      if (!bookedSet.has(`${start_time}-${end_time}`)) {
+        slots.push({
+          schedule_id: schedule.id,
+          hospital_id: schedule.hospital_id || null,
+          start_time,
+          end_time,
+          display: `${to12Hour(cursor)} - ${to12Hour(endTime)}`,
+        });
+      }
+      cursor = endTime;
+    }
+  });
+
+  return slots;
+};
+
+const getStoredUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem("user") || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const resolveUserId = (storedUser) => {
+  const s = storedUser || getStoredUser();
+  const candidates = [
+    localStorage.getItem("userId"),
+    localStorage.getItem("userID"),
+    localStorage.getItem("patientId"),
+    s?.id,
+    s?.data?.id,
+    s?.data?.user?.id,
+    s?.user?.id,
+    s?.user_id,
+  ];
+
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isInteger(value) && value > 0) return value;
+  }
+
+  return null;
+};
+
+const toISODate = (date) => {
+  if (!date) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseISODate = (isoDate) => {
+  if (!isoDate) return null;
+  const [year, month, day] = String(isoDate)
+    .slice(0, 10)
+    .split("-")
+    .map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+};
+
+const normalizeDoctor = (doctor = {}) => {
+  const firstName = doctor.first_name || "";
+  const lastName = doctor.last_name || "";
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+  const displayName = doctor.name || (fullName ? `Dr. ${fullName}` : "");
+
+  return {
+    ...DEFAULT_DOCTOR,
+    ...doctor,
+    id: doctor.id || DEFAULT_DOCTOR.id,
+    name: displayName || DEFAULT_DOCTOR.name,
+    specialty:
+      doctor.specialty ||
+      doctor.specialization_name ||
+      DEFAULT_DOCTOR.specialty,
+    consultationFee:
+      doctor.consultationFee ??
+      doctor.consultation_fee ??
+      DEFAULT_DOCTOR.consultationFee,
+    image: doctor.image || DEFAULT_DOCTOR_IMAGE,
+  };
+};
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/* ─────────────── mock doctor ─────────────── */
-const MOCK_DOCTOR = {
-  name: "Dr. Priya Sharma",
-  specialty: "Cardiologist",
-  hospital: "Heart & Vascular Institute",
-  rating: 4.92,
-  reviews: 256,
-  experience: 15,
-  consultationFee: 150,
-  image:
-    "https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=150&h=150&fit=crop&crop=face",
+const normalizeScheduleDay = (value) => {
+  if (value == null) return null;
+  if (typeof value === "number") return value;
+  const text = String(value).toLowerCase();
+  const names = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  for (let index = 0; index < names.length; index += 1) {
+    if (text.startsWith(names[index])) return index;
+  }
+  const asNumber = Number(value);
+  return Number.isInteger(asNumber) ? asNumber : null;
 };
-
-/* ─────────────── helpers ─────────────── */
-const isSameDay = (a, b) =>
-  a &&
-  b &&
-  a.getFullYear() === b.getFullYear() &&
-  a.getMonth() === b.getMonth() &&
-  a.getDate() === b.getDate();
 
 const isPast = (year, month, day) => {
   const today = new Date();
@@ -85,46 +172,167 @@ const isPast = (year, month, day) => {
   return new Date(year, month, day) < today;
 };
 
-/* ═══════════════════════════════════════════ */
+const isSameDay = (a, b) =>
+  a &&
+  b &&
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate();
+
 export default function BookAppointment() {
   const navigate = useNavigate();
-  const doctor = MOCK_DOCTOR; // replace with useLocation().state?.doctor
-
-  const [currentStep, setCurrentStep] = useState(1);
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [selectedTime, setSelectedTime] = useState(null);
-  const [visitType, setVisitType] = useState("");
-  const [description, setDescription] = useState("");
-  const [payMethod, setPayMethod] = useState("card");
-  const [cardName, setCardName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [cvv, setCvv] = useState("");
+  const location = useLocation();
+  const bookingDraft = location.state?.bookingDraft || null;
+  const doctor = normalizeDoctor(
+    location.state?.doctor || bookingDraft?.doctor || DEFAULT_DOCTOR,
+  );
+  const currentUserId = resolveUserId(getStoredUser());
+  const [currentMonth, setCurrentMonth] = useState(
+    parseISODate(bookingDraft?.appointment_date) || new Date(),
+  );
+  const [currentStep, setCurrentStep] = useState(bookingDraft ? 4 : 1);
+  const [selectedDate, setSelectedDate] = useState(
+    parseISODate(bookingDraft?.appointment_date),
+  );
+  const [selectedSlot, setSelectedSlot] = useState(bookingDraft?.slot || null);
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [allSchedules, setAllSchedules] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [visitType, setVisitType] = useState(
+    bookingDraft?.visitType || "General Consultation",
+  );
+  const [description, setDescription] = useState(
+    bookingDraft?.description || "",
+  );
+  const [payMethod] = useState("khalti");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  /* ── calendar ── */
+  useEffect(() => {
+    if (!selectedDate || !doctor?.id) {
+      setAvailableSlots([]);
+      setSelectedSlot(null);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchAvailableSlots = async () => {
+      setSlotsLoading(true);
+      setError("");
+      if (toISODate(selectedDate) !== bookingDraft?.appointment_date) {
+        setSelectedSlot(null);
+      }
+
+      try {
+        const date = toISODate(selectedDate);
+        const res = await fetch(
+          `${API_BASE}/doctors/${doctor.id}/schedules?date=${date}`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+          throw new Error(data.message || "Unable to load available slots.");
+        }
+
+        if (isMounted) {
+          const slots = buildSlots(
+            data.data?.schedules || [],
+            data.data?.booked_slots || [],
+          );
+          setAvailableSlots(slots);
+
+          if (bookingDraft?.slot && bookingDraft.appointment_date === date) {
+            const draftSlot = bookingDraft.slot;
+            const matchingSlot = slots.find(
+              (slot) =>
+                slot.schedule_id === draftSlot.schedule_id &&
+                slot.start_time === draftSlot.start_time,
+            );
+            setSelectedSlot(matchingSlot || draftSlot);
+          }
+        }
+      } catch (err) {
+        if (isMounted) {
+          setAvailableSlots([]);
+          setError(err.message || "Unable to load available slots.");
+        }
+      } finally {
+        if (isMounted) setSlotsLoading(false);
+      }
+    };
+
+    fetchAvailableSlots();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [bookingDraft, doctor?.id, selectedDate]);
+
+  useEffect(() => {
+    if (!doctor?.id) {
+      setAllSchedules([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchAllSchedules = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/doctors/${doctor.id}/all-schedules`,
+        );
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || data.success === false) {
+          throw new Error(data.message || "Unable to load doctor schedules.");
+        }
+
+        if (isMounted) {
+          setAllSchedules(
+            (data.data?.items || []).filter(
+              (schedule) => schedule.is_active !== false,
+            ),
+          );
+        }
+      } catch (err) {
+        if (isMounted) {
+          setAllSchedules([]);
+          setError(err.message || "Unable to load doctor schedules.");
+        }
+      }
+    };
+
+    fetchAllSchedules();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [doctor?.id]);
+
   const { weeks, monthLabel } = useMemo(() => {
-    const y = currentMonth.getFullYear();
-    const m = currentMonth.getMonth();
-    const firstDow = new Date(y, m, 1).getDay();
-    const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const prevDays = new Date(y, m, 0).getDate();
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const firstDow = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const prevDays = new Date(year, month, 0).getDate();
 
     const cells = [];
-    for (let i = firstDow - 1; i >= 0; i--)
-      cells.push({ day: prevDays - i, cur: false });
-    for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, cur: true });
-    while (cells.length % 7 !== 0)
+    for (let index = firstDow - 1; index >= 0; index -= 1) {
+      cells.push({ day: prevDays - index, cur: false });
+    }
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({ day, cur: true });
+    }
+    while (cells.length % 7 !== 0) {
       cells.push({
         day: cells.length - (firstDow + daysInMonth) + 1,
         cur: false,
       });
+    }
 
     const rows = [];
-    for (let r = 0; r < cells.length / 7; r++)
-      rows.push(cells.slice(r * 7, r * 7 + 7));
+    for (let row = 0; row < cells.length / 7; row += 1) {
+      rows.push(cells.slice(row * 7, row * 7 + 7));
+    }
 
     return {
       weeks: rows,
@@ -143,63 +351,177 @@ export default function BookAppointment() {
       })
     : null;
 
-  /* ── validation ── */
+  const hasAvailabilityOnDate = (date) => {
+    if (!date) return false;
+    const iso = toISODate(date);
+    const dow = date.getDay();
+
+    return allSchedules.some((schedule) => {
+      if (schedule.is_active === false) return false;
+
+      if (schedule.schedule_type === "date" && schedule.specific_date) {
+        return String(schedule.specific_date).slice(0, 10) === iso;
+      }
+
+      if (schedule.schedule_type === "day") {
+        return normalizeScheduleDay(schedule.day_of_week) === dow;
+      }
+
+      return false;
+    });
+  };
+
   const canProceed = () => {
     if (currentStep === 1) return Boolean(selectedDate);
-    if (currentStep === 2) return Boolean(selectedTime);
-    if (currentStep === 3) return visitType && description.trim();
+    if (currentStep === 2) return Boolean(selectedSlot);
+    if (currentStep === 3) return Boolean(visitType && description.trim());
     if (currentStep === 4) {
-      if (payMethod !== "card") return true;
-      return (
-        cardName &&
-        cardNumber.replace(/\s/g, "").length >= 12 &&
-        expiry.length >= 4 &&
-        cvv.length >= 3
+      return Boolean(
+        selectedDate &&
+        selectedSlot &&
+        visitType &&
+        description.trim() &&
+        payMethod === "khalti",
       );
     }
     return false;
   };
 
-  const handleNext = () => {
+  const bookAppointment = async () => {
+    if (!currentUserId) {
+      throw new Error(
+        "Please log in again before confirming this appointment.",
+      );
+    }
+    if (!doctor?.id) {
+      throw new Error(
+        "Doctor information is missing. Please select a doctor again.",
+      );
+    }
+    if (!selectedDate || !selectedSlot) {
+      throw new Error("Please select a date and time slot.");
+    }
+
+    const appointmentPayload = {
+      user_id: currentUserId,
+      doctor_id: Number(doctor.id),
+      hospital_id: selectedSlot.hospital_id,
+      schedule_id: selectedSlot.schedule_id,
+      appointment_date: toISODate(selectedDate),
+      start_time: selectedSlot.start_time,
+      end_time: selectedSlot.end_time,
+      reason: `${visitType}${description.trim() ? `: ${description.trim()}` : ""}`,
+    };
+
+    const appointmentRes = await fetch(`${API_BASE}/appointments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(appointmentPayload),
+    });
+    const appointmentData = await appointmentRes.json().catch(() => ({}));
+    if (!appointmentRes.ok || appointmentData.success === false) {
+      throw new Error(
+        appointmentData.message ||
+          `Booking failed with status ${appointmentRes.status}`,
+      );
+    }
+
+    const appointment = appointmentData.data;
+    const paymentRes = await fetch(`${API_BASE}/payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        appointment_id: appointment.id,
+        user_id: currentUserId,
+        provider: "khalti",
+        payment_method: payMethod,
+        currency: "NPR",
+        metadata: {
+          source: "book-appointment-page",
+          gateway: "khalti-demo",
+          dummy: true,
+        },
+      }),
+    });
+    const paymentData = await paymentRes.json().catch(() => ({}));
+    if (!paymentRes.ok || paymentData.success === false) {
+      throw new Error(paymentData.message || "Payment creation failed.");
+    }
+
+    const verifyRes = await fetch(
+      `${API_BASE}/payments/${paymentData.data.id}/verify`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: currentUserId,
+          status: "paid",
+          provider_payment_id: `demo_khalti_${Date.now()}`,
+        }),
+      },
+    );
+    const verifyData = await verifyRes.json().catch(() => ({}));
+    if (!verifyRes.ok || verifyData.success === false) {
+      throw new Error(verifyData.message || "Payment verification failed.");
+    }
+
+    return { appointment, payment: verifyData.data };
+  };
+
+  const handleNext = async () => {
     setError("");
     if (!canProceed()) {
-      const msgs = [
+      const messages = [
         "Please select a date.",
         "Please select a time slot.",
         "Please complete all visit details.",
-        "Please complete payment information.",
+        "Please confirm the dummy payment.",
       ];
-      return setError(msgs[currentStep - 1]);
-    }
-    if (currentStep < 4) {
-      setCurrentStep((s) => s + 1);
+      setError(messages[currentStep - 1]);
       return;
     }
+
+    if (currentStep < 4) {
+      setCurrentStep((step) => step + 1);
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => navigate("/appointment-confirm"), 1500);
+    try {
+      const result = await bookAppointment();
+      navigate(`/appointment-confirm?id=${result.appointment.id}`, {
+        state: {
+          appointment: result.appointment,
+          payment: result.payment,
+          doctor,
+          date: dateLabel,
+          time: selectedSlot.display,
+          visitType,
+          description,
+        },
+      });
+    } catch (err) {
+      setError(err.message || "Booking failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleBack = () => {
     setError("");
     if (currentStep > 1) {
-      setCurrentStep((s) => s - 1);
+      setCurrentStep((step) => step - 1);
       return;
     }
     navigate(-1);
   };
 
-  /* ════════════ render ════════════ */
   return (
-    <div className="h-screen overflow-hidden flex bg-linear-to-b from-emerald-50 to-white">
-      {/* ══ SIDEBAR ══ */}
-      <aside className="w-[272px] shrink-0 bg-linear-to-r  from-white to-emerald-50 border-r border-gray-300  h-[650px] flex flex-col overflow-y-auto fixed ">
-        {/* Steps */}
-        <div className="px-7 pt-7 flex-1 overflow-y-auto  flex flex-col justify-center items-center">
-          {/* <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-5">
-            Booking Steps
-          </p> */}
+    <div className="h-screen overflow-hidden flex  bg-[#DFF2EB] ">
+      <aside className="w-68 shrink-0 bg-white border-r border-gray-300 h-162.5 flex flex-col h-screen overflow-y-auto fixed">
+        <div className="px-7 pt-7 flex-1 overflow-y-auto flex flex-col justify-center items-center">
           <div className="space-y-1 flex flex-col">
-            <div className={`ml-8 w-0.5 h-10 bg-emerald-400`} />
+            <div className="ml-8 w-0.5 h-10 bg-emerald-400" />
             {STEPS.map((step, idx) => {
               const done = currentStep > step.n;
               const active = currentStep === step.n;
@@ -210,9 +532,7 @@ export default function BookAppointment() {
                     className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
                       active
                         ? "bg-emerald-50 border border-emerald-200"
-                        : done
-                          ? "opacity-70"
-                          : "opacity-70"
+                        : "opacity-70"
                     }`}
                   >
                     <div
@@ -253,14 +573,12 @@ export default function BookAppointment() {
                 </div>
               );
             })}
-            <div className={`ml-8 w-0.5 h-10 bg-gray-100`} />
+            <div className="ml-8 w-0.5 h-10 bg-gray-100" />
           </div>
         </div>
       </aside>
 
-      {/* ══ MAIN ══ */}
-      <main className="flex-1 h-screen overflow-y-auto flex flex-col ml-65 ">
-        {/* Doctor header */}
+      <main className="flex-1 h-screen overflow-y-auto flex flex-col ml-65">
         <header className="shrink-0 bg-emerald-50 border-b border-gray-100 px-10 py-4">
           <div className="flex items-center gap-4">
             <img
@@ -282,7 +600,7 @@ export default function BookAppointment() {
               </span>
               <div className="w-24 h-1.5 rounded-full bg-gray-100 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-500 transition-all duration-500"
+                  className="h-full rounded-full bg-linear-to-r from-emerald-400 to-teal-500 transition-all duration-500"
                   style={{ width: `${(currentStep / STEPS.length) * 100}%` }}
                 />
               </div>
@@ -290,12 +608,9 @@ export default function BookAppointment() {
           </div>
         </header>
 
-        {/* Content area */}
         <div className="flex-1 px-10 py-8 overflow-y-auto">
           <div className="max-w-2xl mx-auto">
-            {/* Card */}
-            <div className="bg-gray-100 rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-              {/* Card header */}
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="px-8 py-5 border-b border-gray-50 flex items-center gap-3">
                 {(() => {
                   const { Icon } = STEPS[currentStep - 1];
@@ -327,112 +642,125 @@ export default function BookAppointment() {
                     {currentStep === 3 &&
                       "Help the doctor prepare for your visit"}
                     {currentStep === 4 &&
-                      `Consultation fee · $${doctor.consultationFee}`}
+                      `Consultation fee - Rs ${doctor.consultationFee}`}
                   </p>
                 </div>
               </div>
 
               <div className="px-8 py-7">
-                {/* ── DATE ── */}
                 {currentStep === 1 && (
                   <div>
-                    <div className="rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                      {/* Month nav bar */}
-                      <div className="bg-emerald-50 px-5 py-3.5 flex items-center justify-between">
+                    <div className="bg-white rounded-2xl border border-[#DFF2EB] shadow-sm p-4 overflow-hidden">
+                      <div className="flex items-center justify-between border-b-2 border-[#A7A7A7] py-3 mb-2">
                         <button
+                          type="button"
                           onClick={() =>
                             setCurrentMonth(
-                              (d) =>
-                                new Date(d.getFullYear(), d.getMonth() - 1),
+                              (date) =>
+                                new Date(
+                                  date.getFullYear(),
+                                  date.getMonth() - 1,
+                                ),
                             )
                           }
-                          className="w-8 h-8 rounded-lg bg-white/20 hover:bg-gray-200 flex items-center justify-center text-white transition"
+                          className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-gray-100 text-gray-500 transition"
                         >
-                          <ChevronLeft className="w-4 h-4" color="black" />
+                          <ChevronLeft className="w-6 h-6" />
                         </button>
-                        <span className="text-black font-bold tracking-wide">
+                        <span className="text-[18px] font-extrabold text-gray-800">
                           {monthLabel}
                         </span>
                         <button
+                          type="button"
                           onClick={() =>
                             setCurrentMonth(
-                              (d) =>
-                                new Date(d.getFullYear(), d.getMonth() + 1),
+                              (date) =>
+                                new Date(
+                                  date.getFullYear(),
+                                  date.getMonth() + 1,
+                                ),
                             )
                           }
-                          className="w-8 h-8 rounded-lg bg-white/20 hover:bg-gray-200 flex items-center justify-center text-white transition"
+                          className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-gray-100 text-gray-500 transition"
                         >
-                          <ChevronRight className="w-4 h-4" color="black" />
+                          <ChevronRight className="w-6 h-6" />
                         </button>
                       </div>
 
-                      {/* Weekday row */}
-                      <div className="grid grid-cols-7 border-b border-gray-400 bg-emerald-50">
-                        {WEEKDAYS.map((d) => (
+                      <div className="grid grid-cols-7 mb-1">
+                        {WEEKDAYS.map((day) => (
                           <div
-                            key={d}
-                            className={`py-2 text-center border-t border-gray-400 text-[11px] font-bold uppercase tracking-wide ${
-                              d != "Sat" ? "border-r " : ""
-                            }`}
+                            key={day}
+                            className="text-center text-[14px] font-bold text-[#51C833] py-1"
                           >
-                            {d}
+                            {day}
                           </div>
                         ))}
                       </div>
 
-                      {/* Day cells */}
-                      <div className="bg-emerald-50 divide-y divide-gray-400">
-                        {weeks.map((week, wi) => (
-                          <div
-                            key={wi}
-                            className="grid grid-cols-7 divide-x divide-gray-400"
-                          >
-                            {week.map((cell, ci) => {
-                              const y = currentMonth.getFullYear();
-                              const m = currentMonth.getMonth();
-                              const past = cell.cur && isPast(y, m, cell.day);
+                      <div className="grid grid-cols-7 gap-y-0.5">
+                        {weeks.map((week, weekIndex) => (
+                          <div key={weekIndex} className="contents">
+                            {week.map((cell, cellIndex) => {
+                              const year = currentMonth.getFullYear();
+                              const month = currentMonth.getMonth();
+                              const past =
+                                cell.cur && isPast(year, month, cell.day);
                               const cellDate = cell.cur
-                                ? new Date(y, m, cell.day)
+                                ? new Date(year, month, cell.day)
                                 : null;
                               const selected =
                                 cell.cur && isSameDay(cellDate, selectedDate);
                               const isToday =
                                 cell.cur && isSameDay(cellDate, new Date());
-                              const isWknd = ci === 0 || ci === 6;
+                              const isWeekend =
+                                cellIndex === 0 || cellIndex === 6;
+                              const available =
+                                cell.cur &&
+                                !past &&
+                                hasAvailabilityOnDate(cellDate);
                               return (
                                 <button
-                                  key={ci}
-                                  disabled={!cell.cur || past}
-                                  onClick={() =>
-                                    cell.cur &&
-                                    !past &&
-                                    setSelectedDate(cellDate)
-                                  }
-                                  className={`relative h-11 flex flex-col items-center justify-center transition-all ${
-                                    cell.cur && !past
-                                      ? "hover:bg-emerald-50 cursor-pointer"
-                                      : "cursor-default"
+                                  type="button"
+                                  key={cellIndex}
+                                  disabled={!cell.cur || past || !available}
+                                  onClick={() => {
+                                    if (cell.cur && !past && available) {
+                                      setSelectedDate(cellDate);
+                                    }
+                                  }}
+                                  className={`relative w-10 h-10 m-1 flex flex-col items-center justify-center rounded-full text-[16px] font-light transition-all ${
+                                    cell.cur && !past && available
+                                      ? "cursor-pointer hover:bg-emerald-50"
+                                      : cell.cur && !past && !available
+                                        ? "cursor-not-allowed bg-gray-50"
+                                        : "cursor-default"
                                   }`}
                                 >
                                   <span
                                     className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all ${
                                       selected
-                                        ? "bg-emerald-500 text-white shadow-md shadow-emerald-200"
+                                        ? "bg-[#51C833] text-white shadow-sm"
                                         : isToday
-                                          ? "border-2 border-emerald-400 text-emerald-600"
+                                          ? "bg-emerald-100 text-emerald-700"
                                           : !cell.cur
                                             ? "text-gray-300"
                                             : past
                                               ? "text-gray-300"
-                                              : isWknd
-                                                ? "text-rose-400"
-                                                : "text-gray-700"
+                                              : !available
+                                                ? "text-gray-300 line-through"
+                                                : isWeekend
+                                                  ? "text-rose-400"
+                                                  : "text-gray-700"
                                     }`}
                                   >
                                     {cell.day}
                                   </span>
                                   {isToday && !selected && (
-                                    <span className="absolute bottom-1 w-1 h-1 rounded-full bg-emerald-400" />
+                                    <span className="absolute bottom-0.5 w-1.5 h-1.5 rounded-full bg-[#51C833]" />
+                                  )}
+                                  {cell.cur && !past && !available && (
+                                    <span className="absolute inset-x-2 bottom-2 h-px bg-gray-300 rotate-[-20deg]" />
                                   )}
                                 </button>
                               );
@@ -456,265 +784,137 @@ export default function BookAppointment() {
                   </div>
                 )}
 
-                {/* ── TIME ── */}
                 {currentStep === 2 && (
                   <div>
-                    <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4">
-                      {TIME_SLOTS.map((t) => {
-                        const active = selectedTime === t;
-                        return (
-                          <button
-                            key={t}
-                            onClick={() => setSelectedTime(t)}
-                            className={`flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold border transition-all ${
-                              active
-                                ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-100 scale-105"
-                                : "bg-white border-gray-200 text-gray-600 hover:border-emerald-300 hover:bg-emerald-50"
-                            }`}
-                          >
-                            <Clock
-                              className={`w-3.5 h-3.5 ${active ? "text-white" : "text-gray-400"}`}
-                              strokeWidth={2}
-                            />
-                            {t}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {selectedDate && selectedTime && (
-                      <div className="mt-5 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                    {slotsLoading ? (
+                      <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm font-medium text-gray-500">
+                        Loading available time slots...
+                      </div>
+                    ) : availableSlots.length ? (
+                      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                        {availableSlots.map((slot) => {
+                          const active =
+                            selectedSlot?.schedule_id === slot.schedule_id &&
+                            selectedSlot?.start_time === slot.start_time;
+                          return (
+                            <button
+                              type="button"
+                              key={`${slot.schedule_id}-${slot.start_time}`}
+                              onClick={() => setSelectedSlot(slot)}
+                              className={`flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold border transition-all ${
+                                active
+                                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm"
+                                  : "border-gray-200 bg-white text-gray-700 hover:border-emerald-300"
+                              }`}
+                            >
+                              {slot.display}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm font-medium text-gray-500">
+                        No available time slots.
+                      </div>
+                    )}
+
+                    {selectedSlot && (
+                      <div className="mt-4 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100">
                         <Clock
                           className="w-4 h-4 text-emerald-500 shrink-0"
                           strokeWidth={2}
                         />
                         <span className="text-sm font-semibold text-emerald-800">
-                          {dateLabel} · {selectedTime}
+                          {selectedSlot.display}
                         </span>
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* ── DETAILS ── */}
                 {currentStep === 3 && (
-                  <div className="space-y-6">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-700 mb-3">
-                        Purpose of visit
-                      </p>
-                      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                        {VISIT_TYPES.map(({ label, Icon }) => {
-                          const active = visitType === label;
-                          return (
-                            <button
-                              key={label}
-                              onClick={() => setVisitType(label)}
-                              className={`flex items-center gap-2.5 rounded-xl border px-3 py-3 text-sm font-medium transition-all ${
-                                active
-                                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm"
-                                  : "border-gray-200 bg-white text-gray-600 hover:border-emerald-300 hover:bg-emerald-50/50"
-                              }`}
-                            >
-                              <Icon
-                                className={`w-4 h-4 shrink-0 ${active ? "text-emerald-600" : "text-gray-400"}`}
-                                strokeWidth={1.8}
-                              />
-                              <span className="leading-tight">{label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Describe your concern
-                      </label>
-                      <textarea
-                        rows={4}
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        placeholder="Briefly describe your symptoms or reason for this appointment…"
-                        className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-50"
-                      />
-                      <p className="text-xs text-gray-400 mt-1 text-right">
-                        {description.length} chars
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── PAYMENT ── */}
-                {currentStep === 4 && (
                   <div className="space-y-5">
                     <div>
-                      <p className="text-sm font-semibold text-gray-700 mb-3">
-                        Payment method
-                      </p>
-                      <div className="grid grid-cols-3 gap-2.5">
+                      <label className="block text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">
+                        Visit type
+                      </label>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                         {[
-                          { key: "card", Icon: CreditCard, label: "Card" },
-                          { key: "upi", Icon: Smartphone, label: "UPI" },
-                          {
-                            key: "cash",
-                            Icon: Banknote,
-                            label: "Cash at Clinic",
-                          },
-                        ].map((m) => (
+                          "General Consultation",
+                          "Follow-up",
+                          "New Symptoms",
+                        ].map((type) => (
                           <button
-                            key={m.key}
-                            onClick={() => setPayMethod(m.key)}
-                            className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-semibold transition-all ${
-                              payMethod === m.key
-                                ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm"
-                                : "border-gray-200 bg-white text-gray-600 hover:border-emerald-300"
+                            type="button"
+                            key={type}
+                            onClick={() => setVisitType(type)}
+                            className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                              visitType === type
+                                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                                : "border-gray-200 bg-white text-gray-700 hover:border-emerald-300"
                             }`}
                           >
-                            <m.Icon
-                              className={`w-4 h-4 ${payMethod === m.key ? "text-emerald-600" : "text-gray-400"}`}
-                              strokeWidth={1.8}
-                            />
-                            {m.label}
+                            {type}
                           </button>
                         ))}
                       </div>
                     </div>
 
-                    {payMethod === "card" && (
-                      <div className="grid grid-cols-2 gap-4">
-                        {[
-                          {
-                            label: "Name on Card",
-                            val: cardName,
-                            set: setCardName,
-                            ph: "John Doe",
-                            type: "text",
-                            span: true,
-                          },
-                          {
-                            label: "Card Number",
-                            val: cardNumber,
-                            set: setCardNumber,
-                            ph: "1234 5678 9012 3456",
-                            type: "text",
-                            span: true,
-                          },
-                          {
-                            label: "Expiry",
-                            val: expiry,
-                            set: setExpiry,
-                            ph: "MM / YY",
-                            type: "text",
-                            span: false,
-                          },
-                          {
-                            label: "CVV",
-                            val: cvv,
-                            set: setCvv,
-                            ph: "•••",
-                            type: "password",
-                            span: false,
-                          },
-                        ].map((f) => (
-                          <div
-                            key={f.label}
-                            className={f.span ? "col-span-2" : ""}
-                          >
-                            <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-                              {f.label}
-                            </label>
-                            <input
-                              type={f.type}
-                              value={f.val}
-                              onChange={(e) => f.set(e.target.value)}
-                              placeholder={f.ph}
-                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-50"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {payMethod === "upi" && (
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 flex items-center gap-3 text-sm text-gray-600">
-                        <Smartphone
-                          className="w-5 h-5 text-emerald-500 shrink-0"
-                          strokeWidth={1.8}
-                        />
-                        You will be redirected to your UPI app after confirming.
-                      </div>
-                    )}
-
-                    {payMethod === "cash" && (
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 flex items-center gap-3 text-sm text-gray-600">
-                        <Building2
-                          className="w-5 h-5 text-emerald-500 shrink-0"
-                          strokeWidth={1.8}
-                        />
-                        Pay at the clinic reception before your appointment.
-                      </div>
-                    )}
-
-                    {/* Summary */}
-                    <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 px-5 py-5">
-                      <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-widest mb-4">
-                        Booking Summary
-                      </p>
-                      <div className="space-y-2.5 text-sm">
-                        <SummaryRow
-                          icon={
-                            <Stethoscope
-                              className="w-4 h-4 text-emerald-500"
-                              strokeWidth={1.8}
-                            />
-                          }
-                          label={doctor.name}
-                          sub={doctor.specialty}
-                        />
-                        {selectedDate && (
-                          <SummaryRow
-                            icon={
-                              <Calendar
-                                className="w-4 h-4 text-emerald-500"
-                                strokeWidth={1.8}
-                              />
-                            }
-                            label={dateLabel}
-                          />
-                        )}
-                        {selectedTime && (
-                          <SummaryRow
-                            icon={
-                              <Clock
-                                className="w-4 h-4 text-emerald-500"
-                                strokeWidth={1.8}
-                              />
-                            }
-                            label={selectedTime}
-                          />
-                        )}
-                        {visitType && (
-                          <SummaryRow
-                            icon={
-                              <ClipboardList
-                                className="w-4 h-4 text-emerald-500"
-                                strokeWidth={1.8}
-                              />
-                            }
-                            label={visitType}
-                          />
-                        )}
-                      </div>
-                      <div className="mt-4 pt-4 border-t border-emerald-200 flex items-center justify-between">
-                        <span className="text-sm text-gray-500">Total</span>
-                        <span className="text-2xl font-black text-emerald-600">
-                          ${doctor.consultationFee}
-                        </span>
-                      </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">
+                        Reason for visit
+                      </label>
+                      <textarea
+                        rows={5}
+                        value={description}
+                        onChange={(event) => setDescription(event.target.value)}
+                        placeholder="Briefly describe symptoms, concerns, or what you want to discuss."
+                        className="w-full resize-none rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-50"
+                      />
                     </div>
+
+                    <BookingSummary
+                      doctor={doctor}
+                      dateLabel={dateLabel}
+                      selectedSlot={selectedSlot}
+                      visitType={visitType}
+                    />
                   </div>
                 )}
 
-                {/* Error */}
+                {currentStep === 4 && (
+                  <div className="space-y-5">
+                    <div className="rounded-2xl border border-emerald-100 bg-white px-5 py-5">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
+                          <CreditCard
+                            className="h-5 w-5 text-emerald-600"
+                            strokeWidth={1.8}
+                          />
+                        </div>
+                        <div>
+                          <p className="font-bold text-gray-800">
+                            Dummy Khalti payment
+                          </p>
+                          <p className="mt-1 text-sm text-gray-500">
+                            No real payment will be taken. Confirming creates a
+                            demo payment record and confirms the appointment.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <BookingSummary
+                      doctor={doctor}
+                      dateLabel={dateLabel}
+                      selectedSlot={selectedSlot}
+                      visitType={visitType}
+                      description={description}
+                      showTotal
+                    />
+                  </div>
+                )}
+
                 {error && (
                   <div className="mt-5 flex items-center gap-2 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
                     <AlertCircle className="w-4 h-4 shrink-0" strokeWidth={2} />
@@ -724,9 +924,9 @@ export default function BookAppointment() {
               </div>
             </div>
 
-            {/* Nav */}
             <div className="mt-5 flex items-center justify-between">
               <button
+                type="button"
                 onClick={handleBack}
                 className="flex items-center gap-2 px-6 py-3 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition"
               >
@@ -734,6 +934,7 @@ export default function BookAppointment() {
                 Back
               </button>
               <button
+                type="button"
                 onClick={handleNext}
                 disabled={loading}
                 className={`flex items-center gap-2 px-10 py-3 rounded-xl text-sm font-bold transition-all ${
@@ -758,7 +959,7 @@ export default function BookAppointment() {
                         strokeDasharray="30 60"
                       />
                     </svg>
-                    Processing…
+                    Processing...
                   </span>
                 ) : (
                   <>
@@ -775,6 +976,74 @@ export default function BookAppointment() {
   );
 }
 
+function BookingSummary({
+  doctor,
+  dateLabel,
+  selectedSlot,
+  visitType,
+  description,
+  showTotal = false,
+}) {
+  return (
+    <div className="rounded-2xl border border-emerald-100 bg-linear-to-br from-emerald-50 to-teal-50 px-5 py-5">
+      <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-widest mb-4">
+        Booking Summary
+      </p>
+      <div className="space-y-2.5 text-sm">
+        <SummaryRow
+          icon={
+            <Stethoscope
+              className="w-4 h-4 text-emerald-500"
+              strokeWidth={1.8}
+            />
+          }
+          label={doctor.name}
+          sub={doctor.specialty}
+        />
+        {dateLabel && (
+          <SummaryRow
+            icon={
+              <Calendar
+                className="w-4 h-4 text-emerald-500"
+                strokeWidth={1.8}
+              />
+            }
+            label={dateLabel}
+          />
+        )}
+        {selectedSlot && (
+          <SummaryRow
+            icon={
+              <Clock className="w-4 h-4 text-emerald-500" strokeWidth={1.8} />
+            }
+            label={selectedSlot.display}
+          />
+        )}
+        {visitType && (
+          <SummaryRow
+            icon={
+              <ClipboardList
+                className="w-4 h-4 text-emerald-500"
+                strokeWidth={1.8}
+              />
+            }
+            label={visitType}
+            sub={description}
+          />
+        )}
+      </div>
+      {showTotal && (
+        <div className="mt-4 pt-4 border-t border-emerald-200 flex items-center justify-between">
+          <span className="text-sm text-gray-500">Total</span>
+          <span className="text-2xl font-black text-emerald-600">
+            Rs {doctor.consultationFee}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SummaryRow({ icon, label, sub }) {
   return (
     <div className="flex items-start gap-2.5">
@@ -782,7 +1051,7 @@ function SummaryRow({ icon, label, sub }) {
       <span className="font-medium text-gray-800">
         {label}
         {sub && (
-          <span className="text-gray-400 font-normal ml-1.5">· {sub}</span>
+          <span className="text-gray-400 font-normal ml-1.5">- {sub}</span>
         )}
       </span>
     </div>

@@ -39,9 +39,19 @@ function Login() {
       }
 
       // Store credentials
+      const loggedInUser = {
+        id: data.data.id,
+        email: data.data.email,
+        role: data.data.role,
+      };
+      localStorage.setItem("user", JSON.stringify(loggedInUser));
       localStorage.setItem("userId", data.data.id);
       localStorage.setItem("userRole", "patient");
       localStorage.setItem("userEmail", data.data.email);
+      localStorage.removeItem("userID");
+      localStorage.removeItem("doctorId");
+      sessionStorage.removeItem("userID");
+      sessionStorage.removeItem("doctorId");
       sessionStorage.setItem("userId", data.data.id);
 
       navigate("/dashboard");
@@ -262,7 +272,7 @@ function Login() {
             </div>
 
             {/* Doctor Login Link */}
-            <div className="border-t border-gray-200 pt-6">
+            <div className="border-t border-gray-200 pt-6 mb-4">
               <p className="text-center text-xs text-gray-500 mb-3">
                 Are you a doctor?
               </p>
@@ -271,6 +281,19 @@ function Login() {
                 className="w-full py-2 border-2 border-gray-300 text-gray-700 font-bold rounded-full flex justify-center items-center hover:bg-gray-100 transition-colors"
               >
                 Doctor Login
+              </Link>
+            </div>
+
+            {/* Admin Login Link */}
+            <div>
+              <p className="text-center text-xs text-gray-500 mb-3">
+                Are you an administrator?
+              </p>
+              <Link
+                to="/admin/login"
+                className="w-full py-2 border-2 border-red-400 text-red-600 font-bold rounded-full flex justify-center items-center hover:bg-red-50 transition-colors"
+              >
+                Admin Login
               </Link>
             </div>
           </form>

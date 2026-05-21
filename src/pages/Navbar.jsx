@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { NotificationBell } from "../components/NotificationBell";
 import logoImg from "../assets/logoimage.png";
 
 function Navbar() {
@@ -75,28 +76,19 @@ function Navbar() {
           </button>
 
           {/* Notification Bell */}
-          <button className="w-10 h-10 rounded-full bg-[#eef2f5] flex items-center justify-center text-gray-700 hover:bg-gray-200 transition-colors relative">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-[22px] w-[22px]"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
-            </svg>
-            <span className="absolute top-1 right-1 w-4 h-4 bg-[#ff4b4b] border-[2px] border-white rounded-full flex items-center justify-center text-[8px] text-white font-bold">
-              3
-            </span>
-          </button>
+          <NotificationBell />
 
           {/* Profile Avatar */}
-          <button className="w-8 h-8 md:w-[42px] md:h-[42px] rounded-full overflow-hidden border-2 border-transparent hover:border-gray-300 transition-colors bg-[#d8c3b5]">
+          <Link
+            to={"/profile"}
+            className="w-8 h-8 md:w-[42px] md:h-[42px] rounded-full overflow-hidden border-2 border-transparent hover:border-gray-300 transition-colors bg-[#d8c3b5]"
+          >
             <img
               src="https://ui-avatars.com/api/?name=Sarah&background=d8c3b5&color=fff&size=40"
               alt="Profile"
               className="w-full h-full object-cover"
             />
-          </button>
+          </Link>
 
           {/* Mobile Menu Toggle */}
           <button

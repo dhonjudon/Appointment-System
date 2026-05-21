@@ -8,7 +8,7 @@ const defaultDoctor = {
   name: "Dr. Anna Kowalski",
   specialty: "ENT Specialist",
   education: "Warsaw Medical Academy",
-  qualifications: ["MD (Otolaryngology)", "Fellowship in Pediatric ENT"],
+  qualifications: [ "Fellowship in Pediatric ENT"],
   hospital: "St. Mary Multispeciality Hospital",
   location: "Downtown Medical District",
   phone: "+48 22 100 2000",
@@ -116,12 +116,11 @@ const mapDoctorApiToViewModel = (doctorApi = {}, schedules = []) => {
     hospital: primaryHospital?.name || defaultDoctor.hospital,
     location: location || defaultDoctor.location,
     email: doctorApi.email || defaultDoctor.email,
-    rating:
-      Number.isFinite(rating) && rating > 0 ? rating : defaultDoctor.rating,
+    rating: Number.isFinite(rating) ? rating : 0,
     reviews:
       Number.isFinite(reviewCount) && reviewCount >= 0
         ? reviewCount
-        : defaultDoctor.reviews,
+        : 0,
     experience:
       Number.isFinite(yearsOfExperience) && yearsOfExperience >= 0
         ? `${yearsOfExperience} years`
@@ -297,7 +296,7 @@ function DoctorProfile() {
           </div>
 
           {/* Quick Info */}
-          <div className="space-y-3 mb-6">
+          {/* <div className="space-y-3 mb-6">
             <div className="flex items-start gap-3 text-sm">
               <svg
                 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0"
@@ -333,7 +332,7 @@ function DoctorProfile() {
               </svg>
               <p className="text-gray-600">{doctor.education}</p>
             </div>
-          </div>
+          </div> */}
 
           {/* Consultation Modes */}
           <div className="mb-6">
@@ -346,8 +345,8 @@ function DoctorProfile() {
                   key={mode}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
                     mode === "Video Consultation"
-                      ? "bg-blue-50 text-blue-600 border border-blue-100"
-                      : "bg-emerald-50 text-emerald-600 border border-emerald-100"
+                      ? "bg-blue-50 hidden text-blue-600 border border-blue-100"
+                      : "bg-emerald-50 block text-emerald-600 border border-emerald-100"
                   }`}
                 >
                   {mode}
@@ -357,7 +356,7 @@ function DoctorProfile() {
           </div>
 
           {/* Languages */}
-          <div className="mb-6">
+          {/* <div className="mb-6">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
               Languages
             </p>
@@ -371,7 +370,7 @@ function DoctorProfile() {
                 </span>
               ))}
             </div>
-          </div>
+          </div> */}
         </div>
       </div>
 
